@@ -1,7 +1,9 @@
 import "./style.css";
 import { loadCatalog, KINDS } from "./catalog/index.js";
 import { createFavorites } from "./app/favorites.js";
-import { mountPlayer } from "./player/player.js";
+import { createPlayer, playerMessage } from "./player/player.js";
+import { progress } from "./app/progress.js";
+import { settings } from "./app/settings.js";
 import { escapeHtml as e } from "./app/util.js";
 
 // Secciones del menú. `kind` indica qué tipo de contenido muestra cada una.
@@ -124,6 +126,24 @@ function playerView(item) {
       ${favButton(item, "fav-big")}
     </div>
   </article>`;
+}
+
+// Muestra el reproductor o, si no hay fuente, un mensaje honesto.
+function mountPlayer(container, item) {
+  if (!item.source) {
+    playerMessage(container, "Este elemento no tiene una fuente de video",
+      item.isDemo ? "Es contenido de demostración: no hay transmisión real asociada." : "La fuente todavía no informó una dirección de video para este título.");
+    return () => {};
+  }
+  const player = createPlayer(container, {
+    source: item.source,
+    title: item.title,
+    live: item.kind === "live",
+    preference: settings.get("player"),
+    startAt: settings.get("resume") ? progress.resumeTime(item.id) : 0,
+    onProgress: (time, duration) => progress.save(item.id, time, duration, { title: item.title })
+  });
+  return () => player.destroy();
 }
 
 // ---------- Dibujo ----------

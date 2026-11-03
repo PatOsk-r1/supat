@@ -11,7 +11,7 @@
     "page": "vite build && node scripts/build-page.mjs"
   },
   "dependencies": {
+    "hls.js": "^1.7.4",
     "vite": "^6.1.0"
-  },
-  "devDependencies": {}
+  }
 }

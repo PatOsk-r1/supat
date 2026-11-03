@@ -112,7 +112,7 @@ main { flex: 1; padding: 28px 4vw 40px; }
 .back { background: none; border: 0; color: var(--muted); padding: 6px 0; margin-bottom: 14px; font-size: 14px; }
 .back:hover { color: #fff; }
 .player { aspect-ratio: 16/9; background: #09090c; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; }
-.player video { width: 100%; flex: 1; min-height: 0; background: #000; }
+.player > .xp { flex: 1; min-height: 0; }
 .player-status { margin: 0; padding: 8px 14px; font-size: 12px; color: var(--muted); background: #0d0d11; }
 .player-message { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 20px; text-align: center; }
 .player-icon { font-size: 34px; color: #4a4458; }
@@ -161,3 +161,37 @@ footer span { color: var(--faint); font-weight: 400; letter-spacing: 0; }
   .watch-info h1 { font-size: 26px; }
   footer { padding: 22px 16px 26px; }
 }
+
+/* ---------- Reproductor ---------- */
+.xp { position: relative; width: 100%; height: 100%; background: #000; color: #fff; overflow: hidden; outline: none; }
+.xp:focus-visible { box-shadow: inset 0 0 0 2px var(--accent-soft); }
+.xp video { width: 100%; height: 100%; display: block; object-fit: contain; background: #000; }
+.xp-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: space-between; pointer-events: none; }
+.xp-overlay > * { pointer-events: auto; }
+.xp-top, .xp-bottom { transition: opacity .25s; opacity: 0; }
+.xp.show-controls .xp-top, .xp.show-controls .xp-bottom, .xp.is-paused .xp-top, .xp.is-paused .xp-bottom, .xp:focus-within .xp-bottom { opacity: 1; }
+.xp:not(.show-controls):not(.is-paused) { cursor: none; }
+.xp-top { display: flex; align-items: center; gap: 12px; padding: 14px 16px 30px; background: linear-gradient(#000c, transparent); }
+.xp-heading { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.xp-heading strong { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.xp-heading small { font-size: 12px; color: #cfcbd8; }
+.xp-center { flex: 1; display: grid; place-items: center; pointer-events: auto; }
+.xp-spinner { width: 46px; height: 46px; border-radius: 50%; border: 3px solid #ffffff30; border-top-color: var(--accent); animation: xp-spin 0.9s linear infinite; pointer-events: none; }
+@keyframes xp-spin { to { transform: rotate(360deg); } }
+.xp-bigplay { width: 76px; height: 76px; border-radius: 50%; border: 0; background: #9a70ffd9; font-size: 28px; box-shadow: 0 10px 40px #0008; }
+.xp-error { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; max-width: 460px; padding: 20px; background: #000b; border-radius: 14px; }
+.xp-error small { color: #c9c4d4; line-height: 1.5; }
+.xp-toast { position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); background: #16151ce6; border: 1px solid var(--line); padding: 10px 16px; border-radius: 10px; font-size: 13px; white-space: nowrap; }
+.link { background: none; border: 0; color: var(--accent-soft); text-decoration: underline; padding: 0; }
+.xp-bottom { padding: 30px 14px 10px; background: linear-gradient(transparent, #000d); display: flex; flex-direction: column; gap: 6px; }
+.xp-seek { width: 100%; accent-color: var(--accent); }
+.xp-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.xp-btn { background: none; border: 0; color: #fff; min-width: 38px; height: 38px; border-radius: 8px; font-size: 17px; display: inline-grid; place-items: center; text-decoration: none; padding: 0 8px; }
+.xp-btn:hover { background: #ffffff1a; }
+.xp-next { font-size: 13px; font-weight: 700; border: 1px solid #ffffff30; }
+.xp-time { font-size: 13px; font-variant-numeric: tabular-nums; color: #e3e0ea; padding: 0 6px; }
+.xp-live { font-size: 11px; font-weight: 800; letter-spacing: 1px; color: #ff6b81; padding: 0 6px; }
+.xp-spacer { flex: 1; }
+.xp-volume { width: 90px; accent-color: var(--accent); }
+.xp-quality { background: #16151c; color: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px; font-size: 12px; }
+@media (max-width: 720px) { .xp-volume { display: none; } .xp-toast { white-space: normal; width: 90%; text-align: center; } }
