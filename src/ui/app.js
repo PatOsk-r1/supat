@@ -7,6 +7,7 @@ import { progress } from "../app/progress.js";
 import { createFavorites } from "../app/favorites.js";
 import { cacheClear, cacheSet } from "../app/cache.js";
 import { catalog } from "../catalog/store.js";
+import * as enrich from "../catalog/enrich.js";
 import { addInstance, updateInstance, removeInstance, getInstance, validateConfig } from "../providers/registry.js";
 import * as home from "./views/home.js";
 import * as browse from "./views/browse.js";
@@ -94,6 +95,18 @@ export function startApp(app, extensions = {}) {
   }
   catalog.subscribe(queueRender);
   ctx.queueRender = queueRender;
+
+  // ---------- TMDb ----------
+  ctx.enrichment = enrich.enrichment;
+  ctx.enrichSeason = enrich.enrichSeason;
+  ctx.testTmdb = async () => {
+    const result = await enrich.checkKey();
+    enrich.enrichInBackground(catalog.all(), queueRender);
+    return result;
+  };
+  ctx.requestEnrichment = item => enrich.request(item, done => {
+    if (state.route.name === "titulo" && state.route.id === done.id && !state.query) render();
+  });
 
   // ---------- acciones ----------
   function toggleFavorite(id) {
@@ -252,6 +265,9 @@ export function startApp(app, extensions = {}) {
   view.addEventListener("error", ev => { if (ev.target.tagName === "IMG") ev.target.remove(); }, true);
 
   render();
-  catalog.load().then(() => render());
+  catalog.load().then(() => {
+    render();
+    enrich.enrichInBackground(catalog.all(), queueRender);
+  });
   return ctx;
 }

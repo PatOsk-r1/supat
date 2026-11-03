@@ -83,12 +83,22 @@ export function render(ctx, route) {
     html,
     mount(view) {
       let alive = true;
-      if (item.kind === "series" && !item.seasons) {
-        ctx.catalog.seasons(item)
-          .then(seasons => { if (alive) view.querySelector("#seasons").innerHTML = seasonsHtml(item, seasons, ctx); })
-          .catch(err => { if (alive) view.querySelector("#seasons").innerHTML = empty("No se pudieron cargar los episodios.", err.message); });
+      const box = () => view.querySelector("#seasons");
+      const show = seasons => { if (alive && box()) box().innerHTML = seasonsHtml(item, seasons, ctx); };
+      if (item.kind === "series") {
+        const seasonsReady = item.seasons ? Promise.resolve(item.seasons) : ctx.catalog.seasons(item);
+        seasonsReady.then(seasons => {
+          if (!box()?.querySelector(".episodes, .empty")) show(seasons); // reemplaza el "Cargando episodios…"
+          // Con TMDb configurado, completar los episodios de la temporada elegida.
+          const selected = seasons[Math.min(ctx.state.season || 0, seasons.length - 1)];
+          Promise.resolve(ctx.requestEnrichment?.(item))
+            .then(() => ctx.enrichSeason?.(item, selected))
+            .then(changed => { if (changed) show(seasons); })
+            .catch(() => {});
+        }).catch(err => { if (alive && box()) box().innerHTML = empty("No se pudieron cargar los episodios.", err.message); });
+      } else {
+        ctx.requestEnrichment?.(item);
       }
-      ctx.requestEnrichment?.(item);
       return () => { alive = false; };
     }
   };
