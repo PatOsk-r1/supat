@@ -36,3 +36,13 @@ Solo lo que figura en `APK_ANALYSIS_REPORT.md` (inspección previa, hecha fuera 
    - Listas M3U propias o de canales que autoricen su retransmisión. No se van a cargar listas de origen dudoso.
 2. Soporte HLS para navegadores que no lo traen (hls.js, gratuito, licencia Apache-2.0). Solo cuando haya una fuente HLS autorizada.
 3. Probar en Firefox y en un celular real.
+
+## Investigación: ¿se pueden reutilizar las fuentes de Xuper TV de forma autorizada? (2026-11-02)
+
+**Conclusión: no existe una vía autorizada.**
+
+- No se encontró documentación pública, API oficial, portal de desarrolladores ni exportación de listas de Xuper TV (búsqueda web del 2026-11-02).
+- Hay fuentes públicas que informan que Xuper TV y Magis TV retransmiten canales, películas y series sin licencia de los titulares de los derechos. Hubo bloqueos judiciales en Argentina y Chile, y Amazon las quitó de Fire TV (TorrentFreak, Piracy Monitor, El Output, 2026). Esas mismas fuentes reportan malware asociado.
+- Como Xuper TV no tiene los derechos, ni siquiera un permiso suyo convertiría su catálogo en una fuente autorizada. La autorización tendría que venir de cada titular de derechos.
+- El APK no está en esta PC, así que no se hizo análisis estático nuevo. El mecanismo interno de obtención de catálogo y de direcciones está detrás de la protección ijiami y no se intentó eludirla.
+- Ojo: "Xuper TV GLOBAL" de la App Store de iOS parece ser otra app, que según su ficha usa la API de TMDb para metadatos.
