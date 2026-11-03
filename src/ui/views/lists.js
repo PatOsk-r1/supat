@@ -35,7 +35,7 @@ export function renderFavorites(ctx) {
 export function renderSearch(ctx) {
   const q = ctx.state.query.trim();
   const results = searchItems(ctx.catalog.all(), q);
-  const groups = [["live", "TV en vivo"], ["movie", "Películas"], ["series", "Series"]]
+  const groups = [["live", "TV en vivo"], ["movie", "Películas"], ["series", "Series"], ["anime", "Anime"]]
     .map(([kind, label]) => [label, results.filter(x => x.kind === kind)])
     .filter(([, list]) => list.length);
   const body = groups.length

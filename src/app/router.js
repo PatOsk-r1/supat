@@ -8,6 +8,7 @@ export const SECTIONS = [
   { id: "tv", label: "TV en vivo", icon: "◉", kind: "live" },
   { id: "peliculas", label: "Películas", icon: "▣", kind: "movie" },
   { id: "series", label: "Series", icon: "▤", kind: "series" },
+  { id: "anime", label: "Anime", icon: "✦", kind: "anime" },
   { id: "favoritos", label: "Favoritos", icon: "♥" },
   { id: "ajustes", label: "Ajustes", icon: "⚙" }
 ];

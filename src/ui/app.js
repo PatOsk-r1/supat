@@ -143,6 +143,7 @@ export function startApp(app, extensions = {}) {
       track.scrollBy({ left: Number(el.dataset.dir) * track.clientWidth * 0.85, behavior: "smooth" });
     },
     season: el => { state.season = Number(el.dataset.index); render(); },
+    source: el => { state.sourceIndex = Number(el.dataset.index); render(); },
     "play-restart": () => { state.restartRequested = true; },
     // En PC el canal se reproduce en la vista previa; en el celular abre la pantalla de reproducción.
     "live-select": (el, ev) => {
@@ -290,6 +291,9 @@ export function startApp(app, extensions = {}) {
     if (state.route.name !== previous.name || state.route.id !== previous.id) {
       state.filters = defaultFilters();
       if (state.route.id !== previous.id) state.season = 0;
+    }
+    if (state.route.id !== previous.id || state.route.episodeId !== previous.episodeId) {
+      state.sourceIndex = 0;
     }
     state.confirm = null;
     if (state.query) { state.query = ""; search.value = ""; }

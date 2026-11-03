@@ -2,6 +2,8 @@
 import { escapeHtml as e } from "../../app/util.js";
 import { PROVIDER_TYPES, getInstances } from "../../providers/registry.js";
 import { heading } from "../components.js";
+import { KINDS } from "../../catalog/model.js";
+import { capabilitiesOf, CAPABILITY_LABELS, secretKeys } from "../../providers/contract.js";
 
 const STATE_TEXT = { ok: "Funcionando", loading: "Cargando…", error: "Con problemas", disabled: "Desactivado" };
 
@@ -35,6 +37,7 @@ function providerCard(instance, ctx) {
         <h3>${e(instance.label)} ${def.isDemo ? `<span class="badge badge-demo">DEMO</span>` : ""}</h3>
         <p>${e(def.description)}</p>
         <p class="provider-origin">Origen: ${e(def.origin)}${def.license ? ` · ${e(def.license)}` : ""}</p>
+        <div class="genres provider-caps">${def.kinds.map(k => `<span class="genre">${e(KINDS[k].label)}</span>`).join("")}${capabilitiesOf(def).map(c => `<span class="genre cap">${e(CAPABILITY_LABELS[c])}</span>`).join("")}</div>
       </div>
       <label class="switch"><input type="checkbox" data-action="provider-toggle" data-id="${e(instance.id)}" data-key="toggle:${e(instance.id)}" ${instance.enabled ? "checked" : ""}>
         <span>${instance.enabled ? "Activo" : "Inactivo"}</span></label>
@@ -49,6 +52,7 @@ function providerCard(instance, ctx) {
       <div class="field"><label for="f-${e(instance.id)}-label">Nombre</label><input id="f-${e(instance.id)}-label" name="__label" value="${e(instance.label)}"></div>
       ${def.fields.map(f => field(instance, f)).join("")}
       ${def.notice ? `<p class="note">${e(def.notice)}</p>` : ""}
+      ${secretKeys(def).length ? `<p class="note">Las claves se guardan solo en este navegador y nunca se muestran en los mensajes de error. Cuando la app tenga servidor, pasarán a guardarse ahí.</p>` : ""}
       <div class="form-actions"><button type="submit" class="primary">Guardar</button></div>
     </form>` : ""}
     <div class="provider-actions">

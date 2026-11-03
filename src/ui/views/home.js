@@ -1,7 +1,7 @@
 // Inicio: carrusel de destacados y filas por tipo y categoría.
 import { escapeHtml as e } from "../../app/util.js";
 import { hrefFor } from "../../app/router.js";
-import { KINDS } from "../../catalog/model.js";
+import { KINDS, hasEpisodes } from "../../catalog/model.js";
 import { cardFor, continueCard, favButton, row, empty, providerBadge } from "../components.js";
 
 const ROW_SIZE = 18;
@@ -25,7 +25,7 @@ function hero(list, ctx) {
         <div class="hero-meta">${[item.year, item.categories.slice(0, 2).join(" · "), item.rating ? `★ ${item.rating.toFixed(1)}` : ""].filter(Boolean).map(e).join("<span>•</span>")} ${providerBadge(item)}</div>
         <p>${e(item.description || "Sin descripción disponible.")}</p>
         <div class="hero-actions">
-          <a class="primary" href="${item.kind === "series" ? hrefFor.detail(item) : hrefFor.watch(item)}" ${i ? 'tabindex="-1"' : ""}>▶ ${item.kind === "series" ? "Ver episodios" : "Reproducir"}</a>
+          <a class="primary" href="${hasEpisodes(item) ? hrefFor.detail(item) : hrefFor.watch(item)}" ${i ? 'tabindex="-1"' : ""}>▶ ${hasEpisodes(item) ? "Ver episodios" : "Reproducir"}</a>
           <a class="secondary" href="${hrefFor.detail(item)}" ${i ? 'tabindex="-1"' : ""}>Más información</a>
           ${favButton(item, ctx, "fav-big")}
         </div>
@@ -50,6 +50,7 @@ export function render(ctx) {
   const live = items.filter(x => x.kind === "live");
   const movies = items.filter(x => x.kind === "movie");
   const series = items.filter(x => x.kind === "series");
+  const anime = items.filter(x => x.kind === "anime");
 
   const categoryRows = ctx.catalog.categories("movie").slice(0, 4)
     .map(cat => [cat, movies.filter(x => x.categories.includes(cat))])
@@ -62,6 +63,7 @@ export function render(ctx) {
     + row("TV en vivo", cards(live), { moreHref: "#/tv" })
     + row("Películas", cards(movies), { moreHref: "#/peliculas" })
     + row("Series", cards(series), { moreHref: "#/series" })
+    + row("Anime", cards(anime), { moreHref: "#/anime" })
     + categoryRows.join("");
 
   return { title: "Inicio", html, mount: mountHero };

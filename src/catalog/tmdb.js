@@ -64,6 +64,7 @@ function mapDetails(d, type, region) {
   const isTv = type === "tv";
   return {
     tmdbId: d.id,
+    imdbId: [d.imdb_id, d.external_ids?.imdb_id].find(id => /^tt\d{5,10}$/.test(id || "")) || "",
     type,
     title: isTv ? d.name : d.title,
     originalTitle: isTv ? d.original_name : d.original_title,
@@ -83,7 +84,8 @@ function mapDetails(d, type, region) {
 
 // Busca un título del catálogo en TMDb. Devuelve los metadatos o null si no lo encuentra.
 export async function lookup(item, opts) {
-  const type = item.kind === "series" ? "tv" : "movie";
+  // Series y anime por episodios se buscan como "tv"; el resto como película.
+  const type = item.kind === "series" || (item.kind === "anime" && !item.source) ? "tv" : "movie";
   const query = cleanTitle(item.title);
   const cacheKey = `tmdb:${opts.language}:${opts.region || ""}:${type}:${query.toLowerCase()}:${item.year || ""}`;
   const cached = await cacheGet(cacheKey);
@@ -95,7 +97,7 @@ export async function lookup(item, opts) {
   const first = found.results?.[0];
   let info = null;
   if (first) {
-    const details = await request(`/${type}/${first.id}`, { append_to_response: "credits,watch/providers" }, opts);
+    const details = await request(`/${type}/${first.id}`, { append_to_response: "credits,watch/providers,external_ids" }, opts);
     info = mapDetails(details, type, opts.region);
   }
   await cacheSet(cacheKey, { info, savedAt: Date.now() });

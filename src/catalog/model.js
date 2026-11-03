@@ -10,7 +10,8 @@
 export const KINDS = {
   live: { label: "TV en vivo", mark: "EN VIVO" },
   movie: { label: "Película", mark: "PELÍCULA" },
-  series: { label: "Serie", mark: "SERIE" }
+  series: { label: "Serie", mark: "SERIE" },
+  anime: { label: "Anime", mark: "ANIME" }
 };
 
 const COLORS = ["poster-a", "poster-b", "poster-c", "poster-d", "poster-e", "poster-f"];
@@ -27,6 +28,20 @@ function normalizeSource(src) {
   const url = text(src.url);
   return url ? { url, type: text(src.type) } : null;
 }
+
+// Identificadores externos validados. Sirven para que distintos proveedores reconozcan
+// el mismo título sin depender unos de otros.
+export function normalizeExternalIds(raw = {}) {
+  const ids = {};
+  const tmdb = parseInt(raw.tmdb ?? raw.tmdbId, 10);
+  if (tmdb > 0) ids.tmdb = tmdb;
+  const imdb = String(raw.imdb ?? raw.imdbId ?? "").trim();
+  if (/^tt\d{5,10}$/.test(imdb)) ids.imdb = imdb;
+  return ids;
+}
+
+// ¿El título se organiza por temporadas y episodios? (series siempre; anime, si las trae)
+export const hasEpisodes = item => item.kind === "series" || (item.kind === "anime" && (Boolean(item.seasons?.length) || item.lazySeasons || !item.source));
 
 // Color estable a partir del título, para los títulos sin imagen.
 function colorFor(title) {
@@ -92,6 +107,7 @@ export function normalizeItem(raw, instance, provider) {
     tvgId: text(raw.tvgId),
     channelNumber: Number(raw.channelNumber) || null,
     extra: raw.extra || null, // datos propios del proveedor (p. ej. id interno para pedir la fuente)
+    externalIds: normalizeExternalIds(raw.externalIds || raw),
     isDemo: Boolean(provider.isDemo)
   };
 }

@@ -84,6 +84,6 @@ test("Dónde verla: se pide junto con los detalles y se usa el país de los ajus
     return { ok: true, status: 200, json: async () => body };
   };
   const info = await lookup({ kind: "movie", title: "Otra", year: 1931 }, { key: "k", language: "es-ES", region: "UY", fetchFn });
-  assert.match(decodeURIComponent(calls[1]), /append_to_response=credits,watch\/providers/);
+  assert.match(decodeURIComponent(calls[1]), /append_to_response=credits,watch\/providers,external_ids/);
   assert.equal(info.watch.groups[0].label, "Gratis");
 });

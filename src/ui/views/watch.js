@@ -1,8 +1,9 @@
 // Pantalla de reproducción. Pide la fuente al catálogo y se la pasa al reproductor.
 import { escapeHtml as e } from "../../app/util.js";
 import { hrefFor } from "../../app/router.js";
-import { KINDS, findEpisode, nextEpisode } from "../../catalog/model.js";
+import { KINDS, findEpisode, nextEpisode, hasEpisodes } from "../../catalog/model.js";
 import { createPlayer, playerMessage } from "../../player/player.js";
+import { createEmbed } from "../../player/embed.js";
 import { favButton, providerBadge, empty } from "../components.js";
 import { resumeEpisode } from "./detail.js";
 
@@ -22,7 +23,7 @@ export function render(ctx, route) {
           <p id="watch-desc">${e(item.description || "")}</p></div>
         <div class="watch-actions">${favButton(item, ctx, "fav-big")}<a class="secondary" href="${backHref}">${item.kind === "live" ? "Canales" : "Detalle"}</a></div>
       </div>
-      <div id="now-next"></div>
+      <div id="sources"></div>
     </article>`,
     mount: view => mountWatch(view, ctx, item, route, backHref)
   };
@@ -34,9 +35,9 @@ function mountWatch(view, ctx, item, route, backHref) {
   const box = view.querySelector("#player");
 
   (async () => {
-    // Series: averiguar qué episodio reproducir.
+    // Series y anime por episodios: averiguar qué episodio reproducir.
     let episode = null;
-    if (item.kind === "series") {
+    if (hasEpisodes(item)) {
       const seasons = await ctx.catalog.seasons(item);
       episode = route.episodeId ? findEpisode(item, route.episodeId)?.episode : resumeEpisode(seasons, ctx);
       if (!episode) { playerMessage(box, "Esta serie no tiene episodios disponibles", "El proveedor no informó episodios para este título."); return; }
@@ -46,9 +47,18 @@ function mountWatch(view, ctx, item, route, backHref) {
     }
     if (!alive) return;
 
-    let source = null;
+    // Fuentes de todos los proveedores compatibles; el usuario puede elegir entre ellas.
+    let source = null, option = null;
     try {
-      source = await ctx.catalog.resolveSource(item, episode);
+      const options = await ctx.catalog.sourcesFor(item, episode);
+      if (!alive) return;
+      const index = Math.min(ctx.state.sourceIndex || 0, Math.max(0, options.length - 1));
+      option = options[index] || null;
+      if (options.length > 1) {
+        view.querySelector("#sources").innerHTML = `<div class="filters" role="group" aria-label="Fuente de reproducción"><span class="note">Fuente:</span>${options.map((o, i) =>
+          `<button type="button" class="filter ${i === index ? "chosen" : ""}" data-action="source" data-index="${i}" data-key="source:${i}" aria-pressed="${i === index}">${e(o.label)}</button>`).join("")}</div>`;
+      }
+      source = option ? await option.resolve() : null;
     } catch (err) {
       if (alive) playerMessage(box, "No se pudo obtener la fuente de video", err.message || "El proveedor no respondió.");
       return;
@@ -67,6 +77,11 @@ function mountWatch(view, ctx, item, route, backHref) {
     ctx.state.restartRequested = false;
     const seasonNumber = episode ? findEpisode(item, episode.id).season.number : 0;
 
+    if (source.type === "embed") {
+      // Reproductor externo del proveedor: la app no controla el video ni guarda el progreso.
+      player = createEmbed(box, { url: source.url, title: item.title, allowedOrigins: option.embedOrigins });
+      return;
+    }
     player = createPlayer(box, {
       source,
       title: item.title,

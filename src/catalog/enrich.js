@@ -12,7 +12,7 @@ let backgroundDone = 0;
 
 const options = () => ({ key: settings.get("tmdbKey"), language: settings.get("language"), region: settings.get("region") });
 export const enabled = () => Boolean(settings.get("tmdbKey"));
-const eligible = item => item && !item.isDemo && (item.kind === "movie" || item.kind === "series");
+const eligible = item => item && !item.isDemo && ["movie", "series", "anime"].includes(item.kind);
 
 function apply(item, data) {
   if (!data) return;
@@ -21,6 +21,10 @@ function apply(item, data) {
   item.description ||= data.description;
   item.rating ||= data.rating;
   item.year ||= data.year;
+  // Identificadores externos: permiten que otros proveedores encuentren fuentes para este título.
+  item.externalIds = { ...item.externalIds };
+  item.externalIds.tmdb ||= data.tmdbId;
+  if (data.imdbId) item.externalIds.imdb ||= data.imdbId;
 }
 
 export function enrichment(item) {

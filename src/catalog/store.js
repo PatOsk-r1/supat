@@ -2,6 +2,8 @@
 // y avisa a la interfaz cuando cambia. La interfaz solo habla con este archivo.
 import { cacheGet, cacheSet, cacheDelete } from "../app/cache.js";
 import { getInstances, getInstance, providerOf, validateConfig } from "../providers/registry.js";
+import { LIMITS, redact, withTimeout } from "../providers/contract.js";
+import { validateEmbedUrl } from "../player/embed.js";
 import { normalizeItem, normalizeSeasons } from "./model.js";
 
 let items = [];
@@ -19,6 +21,12 @@ function rebuild(perProvider) {
 }
 
 const loaded = new Map(); // id de proveedor → elementos normalizados
+const lastNetworkLoad = new Map(); // id de proveedor → momento de la última consulta real
+
+// Mensaje de error de un proveedor, sin claves ni contraseñas.
+function errorText(err, provider, config) {
+  return redact(err?.message || "Error desconocido.", provider, config);
+}
 
 async function loadInstance(instance, force) {
   const provider = providerOf(instance);
@@ -31,6 +39,9 @@ async function loadInstance(instance, force) {
 
   const cached = provider.ttl ? await cacheGet(key) : null;
   const fresh = cached && cached.configHash === JSON.stringify(instance.config) && Date.now() - cached.updatedAt < provider.ttl;
+  // Evita consultar el mismo proveedor muchas veces seguidas (por ejemplo, tocando "Actualizar").
+  const recently = Date.now() - (lastNetworkLoad.get(instance.id) || 0) < LIMITS.minRefreshMs;
+  if (force && recently && loaded.has(instance.id)) return loaded.get(instance.id);
   if (cached && fresh && !force) {
     status.set(instance.id, { state: "ok", count: cached.items.length, updatedAt: cached.updatedAt, fromCache: true });
     if (cached.epg) epg.set(instance.id, cached.epg);
@@ -40,15 +51,23 @@ async function loadInstance(instance, force) {
   status.set(instance.id, { ...(status.get(instance.id) || {}), state: "loading" });
   emit();
   try {
-    const result = await provider.load(instance.config, { instanceId: instance.id });
-    const list = (result.items || []).map(raw => normalizeItem(raw, instance, provider)).filter(Boolean);
+    lastNetworkLoad.set(instance.id, Date.now());
+    const result = await withTimeout(signal => provider.load(instance.config, { instanceId: instance.id, signal }));
+    if (!result || !Array.isArray(result.items)) throw new Error("El proveedor devolvió una respuesta con formato inválido.");
+    // Solo se aceptan los tipos de contenido que el proveedor declara, y hasta un máximo.
+    const list = result.items.slice(0, LIMITS.maxItems)
+      .map(raw => (raw && provider.kinds.includes(raw.kind) ? normalizeItem(raw, instance, provider) : null))
+      .filter(Boolean);
+    const discarded = Math.min(result.items.length, LIMITS.maxItems) - list.length;
+    const notes = [result.warning, discarded ? `Se descartaron ${discarded} elemento(s) incompletos o de un tipo no declarado.` : "",
+      result.items.length > LIMITS.maxItems ? `Se usaron los primeros ${LIMITS.maxItems} títulos.` : ""].filter(Boolean);
     const updatedAt = Date.now();
     if (result.epg) epg.set(instance.id, result.epg); else epg.delete(instance.id);
     if (provider.ttl) await cacheSet(key, { items: list, epg: result.epg || null, updatedAt, configHash: JSON.stringify(instance.config) });
-    status.set(instance.id, { state: "ok", count: list.length, updatedAt, warning: result.warning || "" });
+    status.set(instance.id, { state: "ok", count: list.length, updatedAt, warning: redact(notes.join(" "), provider, instance.config) });
     return list;
   } catch (err) {
-    const message = err?.message || "Error desconocido.";
+    const message = errorText(err, provider, instance.config);
     if (cached) {
       if (cached.epg) epg.set(instance.id, cached.epg);
       status.set(instance.id, { state: "error", count: cached.items.length, updatedAt: cached.updatedAt, fromCache: true, error: `${message} Se muestra la última copia guardada.` });
@@ -57,6 +76,21 @@ async function loadInstance(instance, force) {
     status.set(instance.id, { state: "error", count: 0, error: message });
     return [];
   }
+}
+
+// Valida una fuente que entrega un proveedor. Los reproductores por iframe solo se aceptan
+// desde los orígenes que el proveedor declaró. Devuelve null si la fuente no es válida.
+export function checkSource(source, provider) {
+  if (!source || typeof source.url !== "string") return null;
+  if (source.type === "embed") {
+    const check = validateEmbedUrl(source.url, provider?.embedOrigins || []);
+    return check.ok ? { url: check.url, type: "embed" } : null;
+  }
+  try {
+    const u = new URL(source.url);
+    if (!["http:", "https:"].includes(u.protocol)) return null;
+  } catch { return null; }
+  return { url: source.url, type: typeof source.type === "string" ? source.type : "" };
 }
 
 export const catalog = {
@@ -108,11 +142,43 @@ export const catalog = {
   async resolveSource(item, episode = null) {
     const target = episode || item;
     if (!target.source) return null;
-    if (!target.source.lazy) return target.source;
     const instance = getInstance(item.providerId);
     const provider = instance && providerOf(instance);
+    if (!target.source.lazy) return checkSource(target.source, provider);
     if (!provider?.resolveSource) return null;
-    return provider.resolveSource(item, episode, instance.config);
+    try {
+      const source = await withTimeout(signal => provider.resolveSource(item, episode, instance.config, { instanceId: instance.id, signal }));
+      return checkSource(source, provider);
+    } catch (err) {
+      throw new Error(errorText(err, provider, instance.config));
+    }
+  },
+
+  // Todas las fuentes disponibles para un título: la de su propio proveedor y las que
+  // ofrezcan otros proveedores activos con la capacidad "findSources" (buscan por
+  // identificadores externos). Si un proveedor falla, los demás siguen funcionando.
+  async sourcesFor(item, episode = null) {
+    const options = [];
+    if ((episode || item).source) {
+      const own = providerOf(getInstance(item.providerId) || { type: "" });
+      options.push({ providerId: item.providerId, providerName: item.providerName, label: item.providerName, embedOrigins: own?.embedOrigins || [], resolve: () => catalog.resolveSource(item, episode) });
+    }
+    const season = episode ? (item.seasons || []).find(s => s.episodes.includes(episode))?.number ?? null : null;
+    const query = { kind: item.kind, title: item.title, year: item.year, externalIds: { ...item.externalIds }, season, episode: episode?.number ?? null };
+    const others = getInstances().filter(i => i.enabled && i.id !== item.providerId)
+      .map(i => ({ instance: i, provider: providerOf(i) }))
+      .filter(({ provider }) => typeof provider?.findSources === "function" && provider.kinds.includes(item.kind));
+    const results = await Promise.allSettled(others.map(({ instance, provider }) =>
+      withTimeout(signal => provider.findSources(query, instance.config, { instanceId: instance.id, signal }))));
+    results.forEach((r, n) => {
+      const { instance, provider } = others[n];
+      if (r.status !== "fulfilled" || !Array.isArray(r.value)) return;
+      for (const raw of r.value.slice(0, LIMITS.maxSources)) {
+        const source = checkSource(raw, provider);
+        if (source) options.push({ providerId: instance.id, providerName: instance.label, label: raw.label ? `${instance.label} · ${String(raw.label).slice(0, 40)}` : instance.label, embedOrigins: provider.embedOrigins || [], resolve: async () => source });
+      }
+    });
+    return options;
   },
 
   // Temporadas de una serie: las que vienen en el elemento o las que carga el proveedor.
@@ -122,7 +188,15 @@ export const catalog = {
     if (seasonsCache.has(item.id)) return seasonsCache.get(item.id);
     const instance = getInstance(item.providerId);
     const provider = instance && providerOf(instance);
-    const raw = provider?.loadSeasons ? await provider.loadSeasons(item, instance.config) : [];
+    let raw = [];
+    if (provider?.loadSeasons) {
+      try {
+        raw = await withTimeout(signal => provider.loadSeasons(item, instance.config, { instanceId: instance.id, signal }));
+      } catch (err) {
+        throw new Error(errorText(err, provider, instance.config));
+      }
+    }
+    if (!Array.isArray(raw)) raw = [];
     const seasons = normalizeSeasons(raw, item.id) || [];
     item.seasons = seasons;
     seasonsCache.set(item.id, seasons);

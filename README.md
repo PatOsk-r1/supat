@@ -70,7 +70,7 @@ src/
 tests/         pruebas automáticas (node --test) y archivos de prueba
 ```
 
-Para sumar un tipo de proveedor: crear `src/providers/<nombre>.js` con `type`, `name`, `fields`, `load()` (y opcionalmente `resolveSource()` y `loadSeasons()`), e importarlo en `src/providers/registry.js`.
+Para sumar un proveedor, ver **[PROVEEDORES.md](PROVEEDORES.md)**: contrato común, capacidades, límites, seguridad y pruebas.
 
 ## Dependencias
 

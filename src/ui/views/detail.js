@@ -1,7 +1,7 @@
 // Detalle de una película o serie: imagen de fondo, datos, botones y temporadas/episodios.
 import { escapeHtml as e } from "../../app/util.js";
 import { hrefFor } from "../../app/router.js";
-import { KINDS } from "../../catalog/model.js";
+import { KINDS, hasEpisodes } from "../../catalog/model.js";
 import { formatTime } from "../../player/player.js";
 import { favButton, providerBadge, empty, posterCard, row } from "../components.js";
 
@@ -56,8 +56,9 @@ export function render(ctx, route) {
   const description = info.description || item.description;
   const rating = info.rating || item.rating;
   const genres = info.genres?.length ? info.genres : item.categories;
-  const resume = item.kind === "movie" ? ctx.progress.resumeTime(item.id) : 0;
-  const playLabel = item.kind === "series" ? "▶ Reproducir" : resume ? `▶ Seguir desde ${formatTime(resume)}` : "▶ Reproducir";
+  const resume = !hasEpisodes(item) ? ctx.progress.resumeTime(item.id) : 0;
+  const episodic = hasEpisodes(item);
+  const playLabel = episodic ? "▶ Reproducir" : resume ? `▶ Seguir desde ${formatTime(resume)}` : "▶ Reproducir";
 
   const related = ctx.catalog.all()
     .filter(x => x.kind === item.kind && x.id !== item.id && x.categories.some(c => item.categories.includes(c)))
@@ -85,7 +86,7 @@ export function render(ctx, route) {
         ${info.attribution ? `<p class="attribution">${info.attribution}</p>` : ""}
       </div>
     </div>
-    ${item.kind === "series" ? `<section class="seasons" aria-label="Temporadas y episodios"><h2>Episodios</h2><div id="seasons">${item.seasons ? seasonsHtml(item, item.seasons, ctx) : `<p class="note" role="status">Cargando episodios…</p>`}</div></section>` : ""}
+    ${episodic ? `<section class="seasons" aria-label="Temporadas y episodios"><h2>Episodios</h2><div id="seasons">${item.seasons ? seasonsHtml(item, item.seasons, ctx) : `<p class="note" role="status">Cargando episodios…</p>`}</div></section>` : ""}
     ${row("Títulos similares", related.map(x => posterCard(x, ctx)).join(""))}
   </article>`;
 
@@ -96,7 +97,7 @@ export function render(ctx, route) {
       let alive = true;
       const box = () => view.querySelector("#seasons");
       const show = seasons => { if (alive && box()) box().innerHTML = seasonsHtml(item, seasons, ctx); };
-      if (item.kind === "series") {
+      if (episodic) {
         const seasonsReady = item.seasons ? Promise.resolve(item.seasons) : ctx.catalog.seasons(item);
         seasonsReady.then(seasons => {
           if (!box()?.querySelector(".episodes, .empty")) show(seasons); // reemplaza el "Cargando episodios…"

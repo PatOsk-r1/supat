@@ -9,8 +9,28 @@ import archive from "./internet-archive.js";
 import m3u from "./m3u.js";
 import jellyfin from "./jellyfin.js";
 
-// Para sumar un tipo nuevo: crear su archivo en esta carpeta e importarlo acá.
-export const PROVIDER_TYPES = Object.fromEntries([demo, archive, m3u, jellyfin].map(def => [def.type, def]));
+import { validateProviderDef } from "./contract.js";
+
+// Tipos registrados. Para sumar uno: crear su adaptador en esta carpeta e incluirlo abajo
+// (ver PROVEEDORES.md). Un adaptador que no cumple el contrato se descarta con un aviso,
+// sin afectar a los demás.
+export const PROVIDER_TYPES = {};
+
+export function registerProviderType(def) {
+  const problems = validateProviderDef(def);
+  if (problems.length) {
+    console.warn(`Proveedor "${def?.type || "?"}" descartado: ${problems.join(" ")}`);
+    return false;
+  }
+  PROVIDER_TYPES[def.type] = def;
+  return true;
+}
+
+export function unregisterProviderType(type) {
+  delete PROVIDER_TYPES[type];
+}
+
+[demo, archive, m3u, jellyfin].forEach(registerProviderType);
 
 // En la vista previa publicada (npm run page) el visor bloquea las conexiones externas,
 // así que ahí solo se activa la demostración.
