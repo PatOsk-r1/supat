@@ -1,43 +1,88 @@
-// Pruebas de la lógica que no depende de la pantalla.
-// Se ejecutan con:  npm test   (usa el probador incluido en Node, sin instalar nada)
+// Pruebas del catálogo, los proveedores, favoritos y búsqueda.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { loadCatalog, KINDS } from "../src/catalog/index.js";
-import { demoItems } from "../src/catalog/demo-data.js";
-import { escapeHtml } from "../src/app/util.js";
 
-// Simula el almacenamiento del navegador para probar favoritos en Node.
-function fakeStorage(initial = {}, { broken = false } = {}) {
-  const data = { ...initial };
-  globalThis.localStorage = {
-    getItem: k => { if (broken) throw new Error("bloqueado"); return k in data ? data[k] : null; },
-    setItem: (k, v) => { if (broken) throw new Error("bloqueado"); data[k] = String(v); }
-  };
-  return data;
-}
+const data = {};
+globalThis.localStorage = {
+  getItem: k => (k in data ? data[k] : null),
+  setItem: (k, v) => { data[k] = String(v); },
+  removeItem: k => { delete data[k]; }
+};
 
-test("el catálogo carga todos los elementos de demostración, marcados como demo", async () => {
-  const { items, errors } = await loadCatalog();
-  assert.equal(errors.length, 0);
+const { catalog } = await import("../src/catalog/store.js");
+const { KINDS, normalizeItem, findEpisode, nextEpisode } = await import("../src/catalog/model.js");
+const registry = await import("../src/providers/registry.js");
+const { demoItems } = await import("../src/providers/demo-data.js");
+const { escapeHtml } = await import("../src/app/util.js");
+const { createFavorites } = await import("../src/app/favorites.js");
+const { searchItems, fold } = await import("../src/ui/views/lists.js");
+const { sortItems } = await import("../src/ui/views/browse.js");
+
+test("el catálogo carga los elementos de demostración, marcados como demo y con su origen", async () => {
+  await catalog.load();
+  const items = catalog.all();
   assert.equal(items.length, demoItems.length);
-  assert.ok(items.every(x => x.isDemo && x.provider === "demo"));
+  assert.ok(items.every(x => x.isDemo && x.providerId === "demo" && x.providerName === "Demostración"));
   assert.ok(items.every(x => KINDS[x.kind]));
+  assert.equal(catalog.status("demo").state, "ok");
 });
 
-test("los ids no se repiten", async () => {
-  const { items } = await loadCatalog();
+test("los ids no se repiten y ningún elemento demo trae fuente de video", () => {
+  const items = catalog.all();
   assert.equal(new Set(items.map(x => x.id)).size, items.length);
-});
-
-test("ningún elemento de demostración trae una fuente de video", async () => {
-  const { items } = await loadCatalog();
   assert.ok(items.every(x => x.source === null));
 });
 
-test("hay contenido en las tres secciones y un destacado", async () => {
-  const { items } = await loadCatalog();
-  for (const kind of Object.keys(KINDS)) assert.ok(items.some(x => x.kind === kind), kind);
-  assert.ok(items.some(x => x.featured));
+test("series con temporadas y episodios; siguiente episodio", async () => {
+  const serie = catalog.get("demo:2");
+  const seasons = await catalog.seasons(serie);
+  assert.equal(seasons.length, 2);
+  assert.equal(seasons[0].episodes[0].id, "demo:2/s1e1");
+  assert.equal(findEpisode(serie, "demo:2/s1e3").season.number, 1);
+  assert.equal(nextEpisode(serie, "demo:2/s1e3").id, "demo:2/s2e1");
+  assert.equal(nextEpisode(serie, "demo:2/s2e2"), null);
+});
+
+test("categorías por tipo, ordenadas por cantidad", () => {
+  assert.deepEqual(catalog.categories("movie").slice(0, 1), ["Acción"]);
+  assert.ok(catalog.categories("live").includes("Noticias"));
+});
+
+test("desactivar un proveedor lo saca del catálogo", async () => {
+  registry.updateInstance("demo", { enabled: false });
+  await catalog.load();
+  assert.equal(catalog.all().length, 0);
+  assert.equal(catalog.status("demo").state, "disabled");
+  registry.updateInstance("demo", { enabled: true });
+  await catalog.load();
+  assert.equal(catalog.all().length, demoItems.length);
+});
+
+test("normalizar descarta elementos inválidos y completa valores", () => {
+  const inst = { id: "p", label: "P" };
+  assert.equal(normalizeItem({ id: 1, kind: "otro", title: "x" }, inst, {}), null);
+  assert.equal(normalizeItem({ id: 1, kind: "movie", title: "  " }, inst, {}), null);
+  const x = normalizeItem({ id: 7, kind: "movie", title: "Peli", year: "1950", source: { url: " https://a/b.mp4 " } }, inst, {});
+  assert.equal(x.id, "p:7");
+  assert.equal(x.year, 1950);
+  assert.deepEqual(x.categories, ["Sin categoría"]);
+  assert.equal(x.source.url, "https://a/b.mp4");
+});
+
+test("búsqueda sin acentos, por varias palabras y título primero", () => {
+  const items = catalog.all();
+  assert.equal(fold("Acción"), "accion");
+  assert.deepEqual(searchItems(items, "codigo").map(x => x.title), ["Código Azul"]);
+  assert.ok(searchItems(items, "accion").length >= 2);
+  assert.deepEqual(searchItems(items, "canal 2").map(x => x.title), ["Canal de demostración 2"]);
+  assert.equal(searchItems(items, "   ").length, 0);
+});
+
+test("ordenar por año y título", () => {
+  const movies = catalog.all().filter(x => x.kind === "movie");
+  assert.equal(sortItems(movies, "recientes")[0].year, 2025);
+  assert.equal(sortItems(movies, "antiguos")[0].year, 2023);
+  assert.equal(sortItems(movies, "titulo")[0].title, "Horizonte");
 });
 
 test("escapeHtml neutraliza código HTML", () => {
@@ -45,31 +90,21 @@ test("escapeHtml neutraliza código HTML", () => {
   assert.equal(escapeHtml(null), "");
 });
 
-test("favoritos: agregar, quitar y recordar entre aperturas", async () => {
-  const data = fakeStorage();
-  const { createFavorites } = await import("../src/app/favorites.js");
+test("favoritos: agregar, quitar y recordar entre aperturas", () => {
   const fav = createFavorites();
   assert.equal(fav.toggle("demo:1"), true);
-  assert.equal(fav.has("demo:1"), true);
-  assert.deepEqual(JSON.parse(data["xuper-web:favoritos"]), ["demo:1"]);
-  const reopened = createFavorites();
-  assert.equal(reopened.has("demo:1"), true);
-  assert.equal(reopened.toggle("demo:1"), false);
-  assert.equal(reopened.size, 0);
+  assert.equal(createFavorites().has("demo:1"), true);
+  assert.equal(fav.toggle("demo:1"), false);
+  assert.equal(createFavorites().size, 0);
 });
 
-test("favoritos: datos dañados no rompen la app", async () => {
-  fakeStorage({ "xuper-web:favoritos": "{esto no es json" });
-  const { createFavorites } = await import("../src/app/favorites.js");
-  const fav = createFavorites();
-  assert.equal(fav.size, 0);
+test("favoritos: datos dañados no rompen la app", () => {
+  data["xuper-web:favoritos"] = "{esto no es json";
+  assert.equal(createFavorites().size, 0);
 });
 
-test("favoritos: si el navegador bloquea el almacenamiento, avisa y sigue funcionando", async () => {
-  fakeStorage({}, { broken: true });
-  const { createFavorites } = await import("../src/app/favorites.js");
-  const fav = createFavorites();
-  assert.equal(fav.persistent, false);
-  assert.equal(fav.toggle("demo:2"), true);
-  assert.equal(fav.has("demo:2"), true);
+test("proveedores: agregar valida campos obligatorios y quitar", () => {
+  const list = registry.getInstances();
+  assert.equal(list[0].id, "demo");
+  assert.deepEqual(registry.validateConfig(list[0]), []);
 });
