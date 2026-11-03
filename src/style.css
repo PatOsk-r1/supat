@@ -446,3 +446,14 @@ button[disabled] { opacity: .6; cursor: progress; }
   .auth-card { padding: 24px 18px; }
   .toast { bottom: 80px; }
 }
+
+/* ---------- panel del catálogo central ---------- */
+.admin-tabs { margin: 0 0 18px; }
+.note.ok { color: var(--ok); }
+textarea.code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12.5px; line-height: 1.5; tab-size: 2; white-space: pre; overflow-x: auto; }
+.admin-table td small { display: block; line-height: 1.5; }
+.admin-table td .provider-error { display: block; margin-top: 4px; }
+.history.logs li { border-left: 3px solid var(--line); padding-left: 10px; }
+.history.logs .log-warn { border-left-color: var(--warn); }
+.history.logs .log-error { border-left-color: var(--danger); }
+.history.logs span { word-break: break-word; }

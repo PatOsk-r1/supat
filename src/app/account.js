@@ -2,9 +2,18 @@
 // La seguridad real está en firestore.rules; acá solo se usa la sesión que da Firebase.
 // Los mensajes nunca revelan si un correo está registrado.
 import { getFirebase } from "./firebase.js";
+import { api, apiAvailable } from "./api.js";
 
 const listeners = new Set();
-const state = { ready: false, user: null, profile: null, isAdmin: false };
+const state = { ready: false, user: null, profile: null, isAdmin: false, role: "" };
+
+// Rol en el catálogo central ("owner" | "user"). Lo decide SOLO el servidor; acá solo se
+// usa para mostrar u ocultar el panel (cada operación la vuelve a validar el servidor).
+async function loadRole() {
+  if (!apiAvailable() || !state.user?.emailVerified) return "";
+  try { return (await api.get("/api/me")).role || ""; }
+  catch { return ""; }
+}
 
 function emit() { listeners.forEach(fn => fn(account)); }
 
@@ -57,6 +66,7 @@ export const account = {
   get user() { return state.user; },
   get profile() { return state.profile; },
   get isAdmin() { return state.isAdmin; },
+  get isOwner() { return state.role === "owner"; },
   get signedIn() { return Boolean(state.user); },
   get verified() { return Boolean(state.user?.emailVerified); },
   get suspended() { return Boolean(state.profile?.suspended); },
@@ -70,9 +80,11 @@ export const account = {
       state.user = user ? { uid: user.uid, email: user.email, emailVerified: user.emailVerified } : null;
       state.profile = null;
       state.isAdmin = false;
+      state.role = "";
       if (user) {
         try { Object.assign(state, await loadProfile(fb, user)); }
         catch (err) { state.error = messageFor(err); }
+        state.role = await loadRole();
       }
       state.ready = true;
       emit();
@@ -131,6 +143,7 @@ export const account = {
     await u.reload();
     await u.getIdToken(true);
     state.user = { uid: u.uid, email: u.email, emailVerified: u.emailVerified };
+    state.role = await loadRole();
     emit();
     return u.emailVerified;
   },

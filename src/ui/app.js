@@ -21,6 +21,9 @@ import * as adminView from "./views/admin.js";
 import { account } from "../app/account.js";
 import { userdata } from "../app/userdata.js";
 import { admin } from "../app/admin.js";
+import { centralAdmin } from "../app/central-admin.js";
+import { TAB_DATA } from "./views/central-admin.js";
+import { searchCentral } from "../providers/central.js";
 
 const defaultFilters = () => ({ category: "Todos", provider: "todos", sort: "destacados", limit: 0 });
 
@@ -30,7 +33,9 @@ export function startApp(app, extensions = {}) {
   // Sin sesión (o sin correo verificado) no se guarda nada: el catálogo se explora igual.
   const guestFavorites = { persistent: true, has: () => false, list: () => [], size: 0, toggle: async () => false, clear: async () => {} };
   const guestProgress = { save() {}, flush() {}, get: () => null, resumeTime: () => 0, isFinished: () => false, recent: () => [], all: () => [], remove: async () => {}, clear: async () => {} };
-  const state = { route: parseRoute(location.hash), query: "", filters: defaultFilters(), season: 0, confirm: null, restartRequested: false, tmdbStatus: "", formError: "", formMessage: "", busy: false };
+  const state = { route: parseRoute(location.hash), query: "", filters: defaultFilters(), season: 0, confirm: null, restartRequested: false, tmdbStatus: "", formError: "", formMessage: "", busy: false,
+    central: { tab: null, data: {}, loading: false, error: "", editing: null, newAdapter: "", testResult: null, logLevel: "" },
+    remote: null };
   const ctx = {
     catalog, settings, state, account, userdata, admin, ...extensions,
     get favorites() { return userdata.active ? userdata.favorites : guestFavorites; },
@@ -109,6 +114,36 @@ export function startApp(app, extensions = {}) {
     else if (focusHeading) (view.querySelector("h1") || view).focus({ preventScroll: true });
   }
   ctx.render = render;
+
+  // ---------- catálogo central: datos del panel del propietario ----------
+  const centralLoaders = {
+    adapters: () => centralAdmin.adapters(),
+    providers: () => centralAdmin.providers(),
+    jobs: () => centralAdmin.jobs(),
+    users: () => centralAdmin.users(),
+    logs: () => centralAdmin.logs({ level: state.central.logLevel }),
+    audit: () => centralAdmin.audit(),
+    stats: () => centralAdmin.stats()
+  };
+  // Carga lo que necesita la pestaña (solo lo que falta, o todo con force).
+  ctx.loadCentral = async (tab, { force = false } = {}) => {
+    const c = state.central;
+    c.tab = tab;
+    const need = (TAB_DATA[tab] || []).filter(k => force || !(k in c.data));
+    if (!need.length || c.loading) return;
+    c.loading = true; c.error = "";
+    if (!force) render();
+    try {
+      const values = await Promise.all(need.map(k => centralLoaders[k]()));
+      need.forEach((k, i) => { c.data[k] = values[i]; });
+    } catch (err) {
+      c.error = err?.message || "No se pudo cargar el panel del catálogo central.";
+    } finally {
+      c.loading = false;
+      render();
+    }
+  };
+  const reloadCentral = () => ctx.loadCentral(state.central.tab, { force: true });
 
   // Redibuja como mucho una vez por cuadro. En la pantalla de reproducción no se redibuja
   // por cambios de catálogo, para no cortar el video.
@@ -255,8 +290,64 @@ export function startApp(app, extensions = {}) {
     "admin-delete-list": el => confirmThen(`pub:${el.dataset.id}`, () => run(async () => {
       await admin.deletePublicList(el.dataset.id, "Moderación");
       state.admin = null;
-    }))
+    })),
+
+    // ---------- catálogo central (propietario) ----------
+    "admin-tab": el => { state.adminTab = el.dataset.tab; state.formError = ""; state.formMessage = ""; state.central.editing = null; render(); },
+    "central-new": () => {
+      state.central.newAdapter = app.querySelector("#cadd-type")?.value || "";
+      state.central.editing = "nuevo";
+      state.central.testResult = null;
+      render();
+      view.querySelector('[data-form="central-provider"] input')?.focus();
+    },
+    "central-edit": el => { state.central.editing = el.dataset.id || null; state.central.testResult = null; render(); },
+    "central-toggle": el => run(async () => {
+      await centralAdmin.updateProvider(el.dataset.id, { enabled: el.dataset.enabled === "true" });
+      await reloadCentral();
+    }, { ok: el.dataset.enabled === "true" ? "Proveedor activado." : "Proveedor desactivado: sus títulos dejan de mostrarse (no se borran)." }),
+    "central-sync": el => {
+      const go = () => run(async () => {
+        const { job, existing } = await centralAdmin.sync(el.dataset.id, el.dataset.mode);
+        state.formMessage = existing ? `Ya había un trabajo en curso (#${job.id}).` : `Trabajo #${job.id}: ${job.status === "done" ? "terminado" : job.status === "failed" ? `falló (${job.lastError})` : `primera tanda lista (${job.pages} páginas, ${job.created} nuevos). Sigue solo cada 10 minutos o con "Continuar" en Sincronización.`}`;
+        await reloadCentral();
+      });
+      if (el.dataset.mode === "full") confirmThen(`cfull:${el.dataset.id}`, go); else go();
+    },
+    "central-test": el => {
+      const form = el.closest("form");
+      const config = form ? centralFormConfig(form).config : null;
+      run(async () => {
+        const result = await centralAdmin.testProvider(el.dataset.id, config);
+        state.central.testResult = { id: el.dataset.id, ...result };
+      });
+    },
+    "central-continue": el => run(async () => {
+      const { job } = await centralAdmin.continueJob(el.dataset.id);
+      state.formMessage = `Trabajo #${job.id}: ${job.status === "done" ? "terminado" : `${job.pages} páginas procesadas hasta ahora`}.`;
+      await reloadCentral();
+    }),
+    "central-cancel": el => confirmThen(`ccancel:${el.dataset.id}`, () => run(async () => { await centralAdmin.cancelJob(el.dataset.id); await reloadCentral(); }, { ok: "Trabajo cancelado. Lo importado hasta ahora se conserva." })),
+    "central-role": el => confirmThen(`crole:${el.dataset.uid}`, () => run(async () => { await centralAdmin.updateUser(el.dataset.uid, { role: el.dataset.role }); await reloadCentral(); }, { ok: "Permisos actualizados." })),
+    "central-block": el => confirmThen(`cblock:${el.dataset.uid}`, () => run(async () => { await centralAdmin.updateUser(el.dataset.uid, { blocked: el.dataset.blocked === "true" }); await reloadCentral(); }, { ok: "Acceso actualizado." })),
+    "central-logs-older": el => run(async () => {
+      const older = await centralAdmin.logs({ level: state.central.logLevel, before: el.dataset.before });
+      state.central.data.logs = [...state.central.data.logs, ...older];
+    }),
+    "central-reindex": () => run(async () => { await centralAdmin.reindex(); await reloadCentral(); }, { ok: "Índice de búsqueda reconstruido." }),
+    "remote-more": () => remoteSearch(state.remote?.q, (state.remote?.page || 1) + 1)
   };
+
+  // Formulario de proveedor del catálogo central → { label, schedule, priority, config, clearSecrets }.
+  function centralFormConfig(form) {
+    const data = Object.fromEntries(new FormData(form).entries());
+    const config = {}, clearSecrets = [];
+    for (const [k, v] of Object.entries(data)) {
+      if (k.startsWith("__clear_")) clearSecrets.push(k.slice(8));
+      else if (!k.startsWith("__")) config[k] = v;
+    }
+    return { label: data.__label, schedule: data.__schedule, priority: Number(data.__priority), config, clearSecrets };
+  }
 
   // Ejecuta una operación de cuenta mostrando "ocupado", y después el mensaje o el error.
   async function run(fn, { ok = "", after = null } = {}) {
@@ -264,7 +355,7 @@ export function startApp(app, extensions = {}) {
     render();
     try {
       await fn();
-      state.formMessage = ok;
+      if (ok) state.formMessage = ok;
       after?.();
     } catch (err) {
       state.formError = err?.message || "No se pudo completar la operación.";
@@ -280,7 +371,7 @@ export function startApp(app, extensions = {}) {
     state.confirm = null;
     fn();
   }
-  const CONFIRM_ACTIONS = ["provider-remove", "data-clear", "logout-all", "list-delete", "history-clear", "admin-suspend", "admin-delete-list"];
+  const CONFIRM_ACTIONS = ["provider-remove", "data-clear", "logout-all", "list-delete", "history-clear", "admin-suspend", "admin-delete-list", "central-sync", "central-cancel", "central-role", "central-block"];
 
   app.addEventListener("click", ev => {
     const el = ev.target.closest("[data-action]");
@@ -293,6 +384,7 @@ export function startApp(app, extensions = {}) {
 
   app.addEventListener("change", async ev => {
     const el = ev.target;
+    if (el.dataset.action === "central-log-level") { state.central.logLevel = el.value; delete state.central.data.logs; ctx.loadCentral("registros"); return; }
     if (el.dataset.action === "filter-select") { state.filters[el.dataset.name] = el.value; state.filters.limit = 0; render(); return; }
     if (el.dataset.setting) { settings.set(el.dataset.setting, el.type === "checkbox" ? el.checked : el.value); return; }
     if (el.dataset.action === "provider-toggle") {
@@ -325,6 +417,15 @@ export function startApp(app, extensions = {}) {
       render();
       await catalog.load({ only: id });
       render();
+    } else if (form.dataset.form === "central-provider") {
+      const { label, schedule, priority, config, clearSecrets } = centralFormConfig(form);
+      const id = form.dataset.id;
+      run(async () => {
+        if (id) await centralAdmin.updateProvider(id, { label, schedule, priority, config, clearSecrets });
+        else await centralAdmin.createProvider({ adapter: form.dataset.adapter, label, schedule, priority, config });
+        state.central.editing = null;
+        await reloadCentral();
+      }, { ok: id ? "Cambios guardados." : "Proveedor creado (desactivado). Probá la conexión y activalo." });
     } else if (form.dataset.form === "tmdb") {
       settings.set("tmdbKey", (data.tmdbKey || "").trim());
       settings.set("language", data.language);
@@ -393,15 +494,45 @@ export function startApp(app, extensions = {}) {
       accountLink.removeAttribute("aria-label");
     }
   }
-  account.onChange(() => { updateAccountLink(); queueRender(); });
+  // Al entrar, salir o verificar el correo, el catálogo central se vuelve a pedir con la sesión nueva.
+  let sessionKey = null;
+  account.onChange(() => {
+    updateAccountLink();
+    queueRender();
+    const key = account.ready ? `${account.user?.uid || ""}:${account.verified}` : null;
+    if (key !== null && sessionKey !== null && key !== sessionKey && getInstance("central")?.enabled) {
+      catalog.forgetThrottle("central");
+      catalog.load({ only: "central", force: true }).then(render);
+    }
+    if (key !== null) sessionKey = key;
+  });
   userdata.onChange(queueRender);
   account.start().catch(() => { toast("No se pudo conectar con el servicio de cuentas. El catálogo funciona igual."); });
 
   // ---------- búsqueda ----------
-  let searchTimer = 0;
+  let searchTimer = 0, remoteTimer = 0, remoteAbort = null;
+  // Búsqueda en TODO el catálogo central (paginada en el servidor), además de lo ya cargado.
+  async function remoteSearch(q, page) {
+    remoteAbort?.abort();
+    if (!q || q.length < 2 || !getInstance("central")?.enabled || !account.verified) { state.remote = null; return; }
+    remoteAbort = new AbortController();
+    const previous = page > 1 && state.remote?.q === q ? state.remote.items : [];
+    state.remote = { q, page, items: previous, loading: true, hasMore: false, error: "" };
+    queueRender();
+    try {
+      const res = await searchCentral(q, page, { signal: remoteAbort.signal });
+      state.remote = { q, page, items: [...previous, ...catalog.addExternal("central", res.items)], hasMore: res.hasMore, loading: false, error: "" };
+    } catch (err) {
+      if (err?.name === "AbortError") return;
+      state.remote = { q, page, items: previous, hasMore: false, loading: false, error: err?.message || "No se pudo buscar en el catálogo central." };
+    }
+    if (state.query.trim() === q) render();
+  }
   search.addEventListener("input", () => {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => { state.query = search.value; render(); }, 120);
+    clearTimeout(remoteTimer);
+    remoteTimer = setTimeout(() => remoteSearch(search.value.trim(), 1), 400);
   });
   search.addEventListener("keydown", ev => {
     if (ev.key === "Escape") { search.value = ""; state.query = ""; render(); }
@@ -460,7 +591,7 @@ export function startApp(app, extensions = {}) {
     if (state.route.name !== previous.name || state.route.id !== previous.id || state.route.mode !== previous.mode) {
       state.formError = ""; state.formMessage = "";
       if (state.route.name !== "cuenta") state.authReason = "";
-      if (state.route.name === "admin") state.admin = null; // datos frescos al entrar
+      if (state.route.name === "admin") { state.admin = null; state.central.data = {}; state.central.editing = null; } // datos frescos al entrar
       state.listItems = {}; // las listas se vuelven a leer al entrar (pueden haber cambiado)
     }
     if (state.query) { state.query = ""; search.value = ""; }

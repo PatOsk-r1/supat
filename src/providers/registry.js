@@ -8,6 +8,7 @@ import demo from "./demo.js";
 import archive from "./internet-archive.js";
 import m3u from "./m3u.js";
 import jellyfin from "./jellyfin.js";
+import central from "./central.js";
 
 import { validateProviderDef } from "./contract.js";
 
@@ -31,12 +32,15 @@ export function unregisterProviderType(type) {
 }
 
 [demo, archive, m3u, jellyfin].forEach(registerProviderType);
+// El catálogo central solo aparece si esta versión tiene la dirección de la API (VITE_SUPAT_API).
+if (central.available()) registerProviderType(central);
 
 // En la vista previa publicada (npm run page) el visor bloquea las conexiones externas,
 // así que ahí solo se activa la demostración.
 export const PREVIEW = import.meta.env?.MODE === "page";
 
 const DEFAULT_INSTANCES = [
+  { id: "central", type: "central", enabled: true },
   { id: "archive", type: "archive", enabled: !PREVIEW },
   { id: "demo", type: "demo", enabled: true }
 ];
@@ -58,7 +62,13 @@ function complete(instance) {
 
 export function getInstances() {
   const saved = settings.get("providers");
-  const list = Array.isArray(saved) ? saved : defaultInstances();
+  let list = Array.isArray(saved) ? saved : defaultInstances();
+  // Quien ya tenía proveedores guardados recibe el catálogo central una vez (si lo quita, no vuelve).
+  if (Array.isArray(saved) && PROVIDER_TYPES.central && !settings.get("centralOffered") && !list.some(i => i.type === "central")) {
+    list = [{ id: "central", type: "central", enabled: true }, ...list];
+    settings.set("centralOffered", true);
+    save(list.filter(i => PROVIDER_TYPES[i.type]).map(complete));
+  }
   return list.filter(i => PROVIDER_TYPES[i.type]).map(complete);
 }
 
@@ -72,6 +82,7 @@ export function providerOf(instanceOrId) {
 }
 
 function save(list) {
+  if (list.some(i => i.type === "central") && !settings.get("centralOffered")) settings.set("centralOffered", true);
   settings.set("providers", list.map(({ id, type, label, enabled, config }) => ({ id, type, label, enabled, config })));
 }
 

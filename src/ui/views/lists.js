@@ -44,9 +44,19 @@ export function renderSearch(ctx) {
   const groups = [["live", "TV en vivo"], ["movie", "Películas"], ["series", "Series"], ["anime", "Anime"]]
     .map(([kind, label]) => [label, results.filter(x => x.kind === kind)])
     .filter(([, list]) => list.length);
-  const body = groups.length
+  // Resultados del catálogo central completo (búsqueda en el servidor) que no estén ya arriba.
+  const r = ctx.state.remote?.q === q ? ctx.state.remote : null;
+  const shown = new Set(results.map(x => x.id));
+  const remote = (r?.items || []).filter(x => !shown.has(x.id));
+  const remoteHtml = r ? `<h2 class="group-title">En todo el catálogo central ${remote.length ? `<small>${remote.length}${r.hasMore ? "+" : ""}</small>` : ""}</h2>
+    ${remote.length ? grid(remote.map(x => cardFor(x, ctx)).join(""), "") : ""}
+    ${r.loading ? `<div class="empty" role="status"><div class="xp-spinner"></div>Buscando en el catálogo central…</div>` : ""}
+    ${r.error ? `<p class="note" role="status">${e(r.error)}</p>` : ""}
+    ${!r.loading && !r.error && !remote.length ? `<p class="note">No hay más resultados en el catálogo central.</p>` : ""}
+    ${r.hasMore && !r.loading ? `<div class="more"><button type="button" class="secondary" data-action="remote-more" data-key="remote-more">Ver más resultados</button></div>` : ""}` : "";
+  const body = (groups.length
     ? groups.map(([label, list]) => `<h2 class="group-title">${e(label)} <small>${list.length}</small></h2>${grid(list.slice(0, 60).map(x => cardFor(x, ctx)).join(""), "")}`).join("")
-    : empty(`No encontramos nada con “${q}”.`, "Probá con otro nombre, categoría o año.");
+    : remote.length || r?.loading ? "" : empty(`No encontramos nada con “${q}”.`, "Probá con otro nombre, categoría o año.")) + remoteHtml;
   return {
     title: `Buscar: ${q}`,
     html: `<div class="section-heading">${heading(`${results.length} RESULTADOS`, `“${q}”`)}

@@ -97,7 +97,7 @@ export function renderProfile(ctx) {
       <div class="form-actions"><button type="button" class="primary" data-action="import-local" ${busy(ctx)}>Pasarlos a mi cuenta</button></div></section>` : ""}
     <section class="settings-block" aria-labelledby="h-datos">
       <h2 id="h-datos">Datos de la cuenta</h2>
-      <p class="note">Correo: ${e(a.user.email)}${created ? ` · Cuenta creada el ${e(created)}` : ""}${a.isAdmin ? " · Administrador" : ""}</p>
+      <p class="note">Correo: ${e(a.user.email)}${created ? ` · Cuenta creada el ${e(created)}` : ""}${a.isAdmin ? " · Administrador" : ""}${a.isOwner ? " · Propietario del catálogo" : ""}</p>
       <form data-form="profile-name" class="provider-form">
         <div class="field"><label for="p-name">Nombre</label><input id="p-name" name="name" value="${e(a.name)}" maxlength="40" required></div>
         <div class="form-actions"><button type="submit" class="primary" ${busy(ctx)}>Guardar nombre</button></div>
@@ -119,7 +119,7 @@ export function renderProfile(ctx) {
         ${a.verified ? `<button type="button" class="danger ${confirm === "logout-all" ? "confirming" : ""}" data-action="logout-all" data-key="logout-all">${confirm === "logout-all" ? "¿Seguro? Tocá de nuevo" : "Cerrar todas las sesiones"}</button>` : ""}
       </div>
     </section>
-    ${a.isAdmin ? `<section class="settings-block"><h2>Administración</h2><div class="form-actions"><a class="secondary" href="#/admin">Abrir el panel de administración</a></div></section>` : ""}
+    ${a.isAdmin || a.isOwner ? `<section class="settings-block"><h2>Administración</h2><div class="form-actions"><a class="secondary" href="#/admin">Abrir el panel de administración</a></div></section>` : ""}
     <section class="settings-block danger-zone" aria-labelledby="h-del">
       <h2 id="h-del">Eliminar la cuenta</h2>
       <p class="note">Se borran tu cuenta, tus favoritos, listas (también las públicas) e historial. No se puede deshacer.</p>

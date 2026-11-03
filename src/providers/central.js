@@ -1,0 +1,80 @@
+// Catálogo central de Supat: el catálogo compartido que arma el servidor (Cloudflare Worker + D1)
+// con los proveedores que administra el propietario. Para el resto de la app es un proveedor más.
+// Necesita sesión con el correo verificado. Las fuentes las resuelve el servidor al reproducir.
+import { api, apiAvailable, ApiError } from "../app/api.js";
+import { getFirebase } from "../app/firebase.js";
+
+const PAGE_SIZE = 200;
+const MAX_PAGES_PER_KIND = 5; // hasta 1000 títulos por tipo en la carga inicial; el resto, con la búsqueda
+
+// Título del servidor → elemento crudo del contrato de proveedores (src/catalog/model.js).
+export function toRawItem(t) {
+  return {
+    id: String(t.id),
+    kind: t.kind,
+    title: t.title,
+    year: t.year,
+    description: t.description,
+    poster: t.poster,
+    backdrop: t.backdrop,
+    categories: t.categories,
+    rating: t.rating,
+    externalIds: { tmdb: t.externalIds?.tmdb, imdb: t.externalIds?.imdb },
+    lazySeasons: Boolean(t.hasEpisodes),
+    source: t.hasEpisodes ? null : { lazy: true }
+  };
+}
+
+async function ensureSession() {
+  const { auth } = await getFirebase();
+  await auth.authStateReady?.();
+  if (!auth.currentUser) throw new ApiError("Iniciá sesión para ver el catálogo central.", 401, "auth");
+  if (!auth.currentUser.emailVerified) throw new ApiError("Verificá tu correo para ver el catálogo central.", 403, "verify");
+}
+
+export default {
+  type: "central",
+  name: "Catálogo central de Supat",
+  description: "Películas, series, anime y canales que el propietario incorpora al servidor, compartidos con todos los usuarios. Necesita iniciar sesión.",
+  origin: "Servidor de Supat",
+  kinds: ["movie", "series", "anime", "live"],
+  multiple: false,
+  ttl: 3600e3,
+  defaults: {},
+  fields: [],
+  available: apiAvailable,
+
+  async load(config, { signal }) {
+    await ensureSession();
+    const items = [];
+    for (const kind of this.kinds) {
+      for (let page = 1; page <= MAX_PAGES_PER_KIND; page++) {
+        const res = await api.get(`/api/catalog/titles?kind=${kind}&page=${page}&pageSize=${PAGE_SIZE}`, { signal });
+        items.push(...res.items.map(toRawItem));
+        if (!res.hasMore) break;
+      }
+    }
+    return { items };
+  },
+
+  async loadSeasons(item, config, { signal }) {
+    const detail = await api.get(`/api/catalog/titles/${encodeURIComponent(item.rawId)}`, { signal });
+    return (detail.seasons || []).map(s => ({
+      number: s.number,
+      episodes: s.episodes.map(e => ({ id: String(e.id), number: e.number, title: e.title, description: e.description, still: e.still, duration: e.duration, source: { lazy: true } }))
+    }));
+  },
+
+  async resolveSource(item, episode, config, { signal }) {
+    const query = episode ? `?episode=${encodeURIComponent(episode.rawId)}` : "";
+    const res = await api.get(`/api/catalog/titles/${encodeURIComponent(item.rawId)}/play${query}`, { signal });
+    return { url: res.url, type: res.type };
+  }
+};
+
+// Búsqueda en todo el catálogo central (no solo en lo ya cargado), paginada.
+export async function searchCentral(q, page = 1, { signal } = {}) {
+  await ensureSession();
+  const res = await api.get(`/api/catalog/search?q=${encodeURIComponent(q)}&page=${page}&pageSize=30`, { signal });
+  return { items: res.items.map(toRawItem), hasMore: res.hasMore, page };
+}

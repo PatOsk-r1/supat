@@ -1,16 +1,41 @@
-// Panel de administración: usuarios (suspender/reactivar), listas públicas y auditoría.
+// Panel de administración.
+//  - "Cuentas" (administradores de Firestore): usuarios (suspender/reactivar), listas públicas y auditoría.
+//  - Catálogo central (propietario, rol "owner" del servidor): ver central-admin.js.
 // Muestra solo datos operativos: nunca contraseñas (Firebase no las da) ni datos personales de uso.
 import { escapeHtml as e } from "../../app/util.js";
 import { heading, empty } from "../components.js";
+import { CENTRAL_TABS, renderCentralTab } from "./central-admin.js";
 
 const ACTIONS = { suspend: "Suspendió", reactivate: "Reactivó", "delete-public-list": "Borró la lista pública", "provider-config": "Cambió un proveedor" };
 const date = ms => (ms ? new Date(ms).toLocaleString("es", { dateStyle: "short", timeStyle: "short" }) : "—");
 
+// Pestañas que puede ver esta cuenta. El servidor vuelve a validar cada operación.
+export function adminTabs(account) {
+  return [...(account.isAdmin ? [["cuentas", "Cuentas"]] : []), ...(account.isOwner ? CENTRAL_TABS : [])];
+}
+
 export function render(ctx) {
   const head = `<div class="section-heading">${heading("ADMINISTRACIÓN", "Panel")}</div>`;
   if (!ctx.account.ready) return { title: "Administración", html: head + `<div class="empty" role="status"><div class="xp-spinner"></div>Conectando…</div>` };
-  if (!ctx.account.isAdmin) return { title: "Administración", html: head + empty("No tenés acceso a esta sección.") };
+  const tabs = adminTabs(ctx.account);
+  if (!tabs.length) return { title: "Administración", html: head + empty("No tenés acceso a esta sección.") };
   if (!ctx.account.verified) return { title: "Administración", html: head + empty("Verificá tu correo para usar el panel.", "Tocá el enlace del mail que te enviamos (revisá spam) y después \"Ya lo verifiqué\" en tu perfil.", `<a class="primary" href="#/perfil">Ir a mi perfil</a>`) };
+  if (!tabs.some(([id]) => id === ctx.state.adminTab)) ctx.state.adminTab = tabs[0][0];
+  const tab = ctx.state.adminTab;
+  const nav = tabs.length > 1 ? `<div class="filters admin-tabs" role="tablist" aria-label="Secciones del panel">${tabs.map(([id, label]) =>
+    `<button type="button" role="tab" class="filter ${tab === id ? "chosen" : ""}" aria-selected="${tab === id}" data-action="admin-tab" data-tab="${id}" data-key="atab:${id}">${e(label)}</button>`).join("")}</div>` : "";
+  const message = `${ctx.state.formError ? `<p class="form-error" role="alert">${e(ctx.state.formError)}</p>` : ""}${ctx.state.formMessage ? `<p class="note ok" role="status">${e(ctx.state.formMessage)}</p>` : ""}`;
+  if (tab !== "cuentas") {
+    return {
+      title: "Administración",
+      html: head + nav + message + `<div class="settings">${renderCentralTab(ctx)}</div>`,
+      mount() { ctx.loadCentral?.(tab); return () => {}; }
+    };
+  }
+  return accountsTab(ctx, head + nav);
+}
+
+function accountsTab(ctx, head) {
 
   const data = ctx.state.admin;
   if (!data) {

@@ -12,6 +12,7 @@ const status = new Map();   // id de proveedor → { state, count, updatedAt, er
 const listeners = new Set();
 const seasonsCache = new Map();
 const epg = new Map();      // id de proveedor → { idDeCanal: [{ start, stop, title, description }] }
+const extras = new Map();   // títulos sueltos (de la búsqueda remota) que no están en la carga inicial
 
 function emit() { listeners.forEach(fn => fn()); }
 
@@ -113,7 +114,24 @@ export const catalog = {
     emit();
   },
   all: () => items,
-  get: id => byId.get(id) || null,
+  get: id => byId.get(id) || extras.get(id) || null,
+  // Suma títulos que llegan por la búsqueda remota de un proveedor, para poder abrir su ficha.
+  // Devuelve los elementos normalizados (no cambian la lista general del catálogo).
+  addExternal(instanceId, rawItems) {
+    const instance = getInstance(instanceId);
+    const provider = instance && providerOf(instance);
+    if (!provider) return [];
+    return rawItems.map(raw => {
+      if (!provider.kinds.includes(raw?.kind)) return null;
+      const known = byId.get(`${instanceId}:${raw.id}`);
+      if (known) return known;
+      const item = normalizeItem(raw, instance, provider);
+      if (item) extras.set(item.id, item);
+      return item;
+    }).filter(Boolean);
+  },
+  // Permite volver a consultar un proveedor ya mismo (por ejemplo, al iniciar sesión).
+  forgetThrottle(id) { lastNetworkLoad.delete(id); },
   status: id => status.get(id) || { state: "disabled", count: 0 },
   // Categorías presentes para un tipo de contenido, ordenadas por cantidad de títulos.
   categories(kind) {
