@@ -6,6 +6,7 @@ const KEY = "xuper-web:ajustes";
 
 export const DEFAULT_SETTINGS = {
   language: "es-ES",     // idioma de los metadatos de TMDb
+  region: "UY",          // país para "Dónde verla"
   tmdbKey: "",           // clave de TMDb (la carga el usuario en Ajustes; nunca va en el código)
   player: "auto",        // "auto" | "native" | "hlsjs"
   autoplayNext: true,    // pasar solo al siguiente episodio

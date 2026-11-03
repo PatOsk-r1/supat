@@ -10,7 +10,7 @@ const BACKGROUND_LIMIT = 150; // máximo de búsquedas automáticas por sesión 
 const CONCURRENCY = 3;
 let backgroundDone = 0;
 
-const options = () => ({ key: settings.get("tmdbKey"), language: settings.get("language") });
+const options = () => ({ key: settings.get("tmdbKey"), language: settings.get("language"), region: settings.get("region") });
 export const enabled = () => Boolean(settings.get("tmdbKey"));
 const eligible = item => item && !item.isDemo && (item.kind === "movie" || item.kind === "series");
 

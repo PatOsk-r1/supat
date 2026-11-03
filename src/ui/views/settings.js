@@ -89,6 +89,9 @@ export function render(ctx) {
       <form data-form="tmdb" class="provider-form">
         <div class="field"><label for="tmdb-key">Clave de API (v3) o token de lectura (v4)</label>
           <input id="tmdb-key" name="tmdbKey" type="password" value="${e(s.tmdbKey)}" autocomplete="off" spellcheck="false"></div>
+        <div class="field"><label for="tmdb-region">País para "Dónde verla"</label>
+          <select id="tmdb-region" name="region">${[["UY", "Uruguay"], ["AR", "Argentina"], ["CL", "Chile"], ["MX", "México"], ["CO", "Colombia"], ["PE", "Perú"], ["ES", "España"], ["BR", "Brasil"], ["US", "Estados Unidos"]]
+            .map(([v, t]) => `<option value="${v}" ${s.region === v ? "selected" : ""}>${t}</option>`).join("")}</select></div>
         <div class="field"><label for="tmdb-lang">Idioma de la información</label>
           <select id="tmdb-lang" name="language">${[["es-ES", "Español (España)"], ["es-MX", "Español (Latinoamérica)"], ["en-US", "Inglés"], ["pt-BR", "Portugués (Brasil)"]]
             .map(([v, t]) => `<option value="${v}" ${s.language === v ? "selected" : ""}>${t}</option>`).join("")}</select></div>

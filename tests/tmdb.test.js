@@ -1,7 +1,7 @@
 // Pruebas del cliente de TMDb con respuestas simuladas (sin conexión real ni clave).
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildRequest, cleanTitle, lookup, seasonEpisodes, testKey, TmdbError } from "../src/catalog/tmdb.js";
+import { buildRequest, cleanTitle, lookup, seasonEpisodes, testKey, TmdbError, mapWatchProviders } from "../src/catalog/tmdb.js";
 
 function fakeFetch(routes) {
   const calls = [];
@@ -63,4 +63,27 @@ test("episodios de una temporada", async () => {
 test("clave rechazada da un mensaje claro", async () => {
   const fetchFn = fakeFetch({ "/configuration": 401 });
   await assert.rejects(testKey({ key: "mala", language: "es-ES", fetchFn }), err => err instanceof TmdbError && /rechazó la clave/.test(err.message));
+});
+
+test("Dónde verla: agrupa por tipo para el país pedido y descarta países sin datos", () => {
+  const data = { results: { UY: { link: "https://www.themoviedb.org/movie/1/watch?locale=UY", flatrate: [{ provider_name: "Plataforma A", logo_path: "/a.png" }], rent: [{ provider_name: "Tienda B", logo_path: "/b.png" }] } } };
+  const w = mapWatchProviders(data, "UY");
+  assert.deepEqual(w.groups.map(g => g.label), ["Incluida en suscripción", "Alquiler"]);
+  assert.equal(w.groups[0].providers[0].logo, "https://image.tmdb.org/t/p/w92/a.png");
+  assert.match(w.link, /locale=UY/);
+  assert.equal(mapWatchProviders(data, "AR"), null);
+  assert.equal(mapWatchProviders(undefined, "UY"), null);
+});
+
+test("Dónde verla: se pide junto con los detalles y se usa el país de los ajustes", async () => {
+  const calls = [];
+  const fetchFn = async url => {
+    calls.push(url);
+    const path = new URL(url).pathname.replace("/3", "");
+    const body = path === "/search/movie" ? { results: [{ id: 5 }] } : { id: 5, title: "X", "watch/providers": { results: { UY: { free: [{ provider_name: "Gratis C", logo_path: "/c.png" }] } } } };
+    return { ok: true, status: 200, json: async () => body };
+  };
+  const info = await lookup({ kind: "movie", title: "Otra", year: 1931 }, { key: "k", language: "es-ES", region: "UY", fetchFn });
+  assert.match(decodeURIComponent(calls[1]), /append_to_response=credits,watch\/providers/);
+  assert.equal(info.watch.groups[0].label, "Gratis");
 });

@@ -47,7 +47,20 @@ export async function testKey(opts) {
   return true;
 }
 
-function mapDetails(d, type) {
+// Grupos de "Dónde verla", en el orden en que se muestran.
+const WATCH_GROUPS = [["flatrate", "Incluida en suscripción"], ["free", "Gratis"], ["ads", "Gratis con anuncios"], ["rent", "Alquiler"], ["buy", "Compra"]];
+
+// Plataformas legales donde está el título en un país (datos de JustWatch vía TMDb).
+export function mapWatchProviders(data, region) {
+  const r = data?.results?.[region];
+  if (!r) return null;
+  const groups = WATCH_GROUPS
+    .map(([key, label]) => ({ label, providers: (r[key] || []).map(p => ({ name: p.provider_name, logo: image(p.logo_path, "w92") })) }))
+    .filter(g => g.providers.length);
+  return groups.length ? { link: r.link || "", groups } : null;
+}
+
+function mapDetails(d, type, region) {
   const isTv = type === "tv";
   return {
     tmdbId: d.id,
@@ -63,6 +76,7 @@ function mapDetails(d, type) {
     runtime: isTv ? (d.episode_run_time?.[0] || null) : (d.runtime || null),
     seasonCount: isTv ? d.number_of_seasons || null : null,
     cast: (d.credits?.cast || []).slice(0, 8).map(c => c.name),
+    watch: region ? mapWatchProviders(d["watch/providers"], region) : null,
     attribution: "Información e imágenes de TMDb."
   };
 }
@@ -71,7 +85,7 @@ function mapDetails(d, type) {
 export async function lookup(item, opts) {
   const type = item.kind === "series" ? "tv" : "movie";
   const query = cleanTitle(item.title);
-  const cacheKey = `tmdb:${opts.language}:${type}:${query.toLowerCase()}:${item.year || ""}`;
+  const cacheKey = `tmdb:${opts.language}:${opts.region || ""}:${type}:${query.toLowerCase()}:${item.year || ""}`;
   const cached = await cacheGet(cacheKey);
   if (cached && Date.now() - cached.savedAt < CACHE_DAYS * 864e5) return cached.info;
 
@@ -81,8 +95,8 @@ export async function lookup(item, opts) {
   const first = found.results?.[0];
   let info = null;
   if (first) {
-    const details = await request(`/${type}/${first.id}`, { append_to_response: "credits" }, opts);
-    info = mapDetails(details, type);
+    const details = await request(`/${type}/${first.id}`, { append_to_response: "credits,watch/providers" }, opts);
+    info = mapDetails(details, type, opts.region);
   }
   await cacheSet(cacheKey, { info, savedAt: Date.now() });
   return info;

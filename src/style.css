@@ -377,3 +377,12 @@ footer span { color: var(--faint); font-weight: 400; letter-spacing: 0; }
   .live-list { max-height: none; }
 }
 .preview-banner { margin: 14px var(--gutter) 0; background: #ffc56b14; border: 1px solid #ffc56b44; color: #ffe2b0; padding: 10px 14px; border-radius: 10px; font-size: 13px; line-height: 1.5; }
+
+/* "Dónde verla" */
+.watch-where { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: #ffffff06; max-width: 68ch; }
+.watch-where h2 { font-size: 16px; }
+.where-group { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.where-group > span { font-size: 12px; color: var(--muted); min-width: 150px; }
+.where-group ul { list-style: none; margin: 0; padding: 0; display: flex; gap: 8px; flex-wrap: wrap; }
+.where-group li { font-size: 12px; }
+.where-group img { width: 40px; height: 40px; border-radius: 10px; display: block; }

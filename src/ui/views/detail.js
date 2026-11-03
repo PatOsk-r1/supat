@@ -22,6 +22,16 @@ function episodeRow(item, ep, ctx) {
   </li>`;
 }
 
+// "Dónde verla": plataformas legales del país elegido en Ajustes (TMDb + JustWatch).
+function watchHtml(watch) {
+  return `<section class="watch-where" aria-labelledby="h-where"><h2 id="h-where">Dónde verla</h2>
+    ${watch.groups.map(g => `<div class="where-group"><span>${e(g.label)}</span><ul>${g.providers.map(p =>
+      `<li title="${e(p.name)}">${p.logo ? `<img src="${e(p.logo)}" alt="${e(p.name)}" loading="lazy">` : e(p.name)}</li>`).join("")}</ul></div>`).join("")}
+    ${watch.link ? `<a class="see-all" href="${e(watch.link)}" target="_blank" rel="noopener noreferrer">Ver opciones en TMDb ↗</a>` : ""}
+    <p class="attribution">Datos de disponibilidad de JustWatch.</p>
+  </section>`;
+}
+
 export function seasonsHtml(item, seasons, ctx) {
   if (!seasons.length) return empty("Este proveedor no informó temporadas ni episodios.");
   const selected = Math.min(ctx.state.season || 0, seasons.length - 1);
@@ -71,6 +81,7 @@ export function render(ctx, route) {
           ${favButton(item, ctx, "fav-big")}
         </div>
         ${info.cast?.length ? `<p class="cast"><strong>Reparto:</strong> ${info.cast.map(e).join(", ")}</p>` : ""}
+        ${info.watch ? watchHtml(info.watch) : ""}
         ${info.attribution ? `<p class="attribution">${info.attribution}</p>` : ""}
       </div>
     </div>

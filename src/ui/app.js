@@ -222,6 +222,7 @@ export function startApp(app, extensions = {}) {
     } else if (form.dataset.form === "tmdb") {
       settings.set("tmdbKey", (data.tmdbKey || "").trim());
       settings.set("language", data.language);
+      settings.set("region", data.region);
       state.tmdbStatus = data.tmdbKey ? "Probando la clave…" : "Sin clave: no se completarán imágenes ni información.";
       render();
       if (data.tmdbKey && ctx.testTmdb) {
