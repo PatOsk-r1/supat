@@ -3,7 +3,7 @@
 // Nunca muestra que algo se reproduce si el video no arrancó de verdad.
 import { escapeHtml } from "../app/util.js";
 import { readJSON, writeJSON } from "../app/storage.js";
-import { attachSource, detectType, HLS_TYPE } from "./engine.js";
+import { attachSource, detectType, mseSupported, HLS_TYPE } from "./engine.js";
 
 const VOLUME_KEY = "xuper-web:volumen";
 
@@ -48,7 +48,7 @@ export function createPlayer(container, opts) {
       </div>
       <div class="xp-center">
         <div class="xp-spinner" aria-hidden="true"></div>
-        <button type="button" class="xp-bigplay" data-xp="play" aria-label="Reproducir" hidden>▶</button>
+        <button type="button" class="xp-bigplay" data-xp="playnow" aria-label="Reproducir" hidden>▶</button>
         <div class="xp-error" role="alert" hidden></div>
       </div>
       <div class="xp-toast" role="status" hidden></div>
@@ -78,7 +78,7 @@ export function createPlayer(container, opts) {
 
   let attached = null;
   let destroyed = false;
-  let triedHlsJsFallback = false;
+  let triedFallback = false; // en "Automático", un solo cambio de motor (hls.js ↔ nativo)
   let lastSaved = 0;
   let hideTimer = 0;
   let seeking = false;
@@ -137,7 +137,8 @@ export function createPlayer(container, opts) {
 
   // ---------- acciones ----------
   const actions = {
-    play: () => { video.paused ? video.play().catch(() => { bigPlay.hidden = false; }) : video.pause(); },
+    play: () => { video.paused ? actions.playnow() : video.pause(); },
+    playnow: () => { bigPlay.hidden = true; video.play().catch(() => { bigPlay.hidden = false; }); },
     back10: () => { video.currentTime = Math.max(0, video.currentTime - 10); },
     fwd10: () => { video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 10); },
     mute: () => { video.muted = !video.muted; if (!video.muted && video.volume === 0) video.volume = 0.5; },
@@ -147,7 +148,7 @@ export function createPlayer(container, opts) {
       else video.webkitEnterFullscreen?.(); // iPhone: solo el video puede ir a pantalla completa
     },
     restart: () => { video.currentTime = 0; toast.hidden = true; video.play().catch(() => {}); },
-    retry: () => { clearError(); triedHlsJsFallback = false; load(opts.preference); }
+    retry: () => { clearError(); triedFallback = false; load(opts.preference); }
   };
 
   root.addEventListener("click", ev => {
@@ -189,8 +190,8 @@ export function createPlayer(container, opts) {
     error: () => {
       // En "Automático", si el HLS nativo falla se prueba una vez con hls.js.
       const isHls = detectType(opts.source.url, opts.source.type) === HLS_TYPE;
-      if (attached?.engine === "native" && isHls && !triedHlsJsFallback && (opts.preference || "auto") === "auto") {
-        triedHlsJsFallback = true;
+      if (attached?.engine === "native" && isHls && !triedFallback && (opts.preference || "auto") === "auto" && mseSupported()) {
+        triedFallback = true;
         load("hlsjs");
         return;
       }
@@ -214,7 +215,16 @@ export function createPlayer(container, opts) {
       const result = await attachSource(video, opts.source, {
         preference,
         onLevels,
-        onFatal: err => showError(err.code, err.message)
+        onFatal: err => {
+          // Si hls.js no pudo descargar la transmisión, en "Automático" se prueba una vez el
+          // reproductor nativo (en Safari puede funcionar aunque el servidor no permita CORS).
+          if (err.code === "network" && !triedFallback && (opts.preference || "auto") === "auto" && video.canPlayType(HLS_TYPE)) {
+            triedFallback = true;
+            load("native");
+          } else {
+            showError(err.code, err.code === "network" ? "La transmisión no respondió, o su servidor no permite reproducirla desde una página web (CORS)." : err.message);
+          }
+        }
       });
       if (destroyed) { result.destroy(); return; }
       attached = result;

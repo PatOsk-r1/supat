@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Guía de prueba: programas largos para que siempre haya uno "ahora". -->
+<tv>
+  <programme start="20260101000000 +0000" stop="20271231000000 +0000" channel="prueba.1"><title>Programa de prueba 1</title><desc>Transmisión de ejemplo publicada por Apple para desarrolladores.</desc></programme>
+  <programme start="20271231000000 +0000" stop="20281231000000 +0000" channel="prueba.1"><title>Programa siguiente</title></programme>
+  <programme start="20260101000000 +0000" stop="20271231000000 +0000" channel="prueba.2"><title>Programa de prueba 2</title></programme>
+</tv>

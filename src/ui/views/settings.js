@@ -103,7 +103,7 @@ export function render(ctx) {
       <div class="field"><label for="set-player">Reproductor para HLS (.m3u8)</label>
         <select id="set-player" data-setting="player">
           ${[["auto", "Automático (recomendado)"], ["native", "Solo el del navegador"], ["hlsjs", "Siempre hls.js"]].map(([v, t]) => `<option value="${v}" ${s.player === v ? "selected" : ""}>${t}</option>`).join("")}
-        </select><small>"Automático" usa el soporte del navegador y, si falla, hls.js.</small></div>
+        </select><small>"Automático" usa hls.js cuando el navegador lo admite y, si falla, el reproductor del navegador.</small></div>
       <label class="check"><input type="checkbox" data-setting="resume" ${s.resume ? "checked" : ""}> Seguir desde donde lo dejé</label>
       <label class="check"><input type="checkbox" data-setting="autoplayNext" ${s.autoplayNext ? "checked" : ""}> Pasar solo al siguiente episodio</label>
     </section>

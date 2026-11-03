@@ -44,7 +44,9 @@ async function attachHlsJs(video, url, onFatal, onLevels) {
   let mediaRecovered = false;
   hls.on(Hls.Events.ERROR, (_e, data) => {
     if (!data.fatal) return;
-    if (data.type === Hls.ErrorTypes.NETWORK_ERROR && networkRetries < 2) {
+    // Si ni siquiera se pudo leer la lista principal, reintentar no sirve (hls.js ya reintentó).
+    const manifestFailed = /^manifest/i.test(data.details || "");
+    if (data.type === Hls.ErrorTypes.NETWORK_ERROR && networkRetries < 2 && !manifestFailed) {
       networkRetries++;
       hls.startLoad();
     } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR && !mediaRecovered) {
@@ -66,14 +68,26 @@ async function attachHlsJs(video, url, onFatal, onLevels) {
   };
 }
 
+// ¿Este navegador puede usar hls.js? (necesita Media Source Extensions)
+export function mseSupported() {
+  return typeof window !== "undefined" && Boolean(window.MediaSource || window.ManagedMediaSource);
+}
+
 // preference: "auto" | "native" | "hlsjs"
+// En "auto" se usa hls.js si el navegador lo admite, y el nativo si no (iPhone antiguo, etc.).
+// Motivo: algunos navegadores dicen soportar HLS nativo y fallan; además, si el intento nativo
+// va primero, la lista queda guardada en caché sin permiso CORS y hls.js ya no puede leerla.
 export async function attachSource(video, source, { preference = "auto", onFatal, onLevels } = {}) {
   const type = detectType(source.url, source.type);
   if (type === HLS_TYPE) {
     const native = Boolean(video.canPlayType(HLS_TYPE));
-    if (preference === "native" || (preference === "auto" && native)) {
-      if (!native && preference === "native") throw new PlaybackError("unsupported", "El navegador no reproduce HLS sin ayuda. Elegí \"Automático\" en Ajustes.");
+    if (preference === "native") {
+      if (!native) throw new PlaybackError("unsupported", "El navegador no reproduce HLS sin ayuda. Elegí \"Automático\" en Ajustes.");
       return attachNative(video, source.url);
+    }
+    if (preference === "auto" && !mseSupported()) {
+      if (native) return attachNative(video, source.url);
+      throw new PlaybackError("unsupported", "Este navegador no puede reproducir HLS.");
     }
     return attachHlsJs(video, source.url, onFatal, onLevels);
   }

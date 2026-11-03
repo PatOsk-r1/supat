@@ -5,11 +5,15 @@
 // Las instancias se guardan en los ajustes del navegador.
 import { settings } from "../app/settings.js";
 import demo from "./demo.js";
+import archive from "./internet-archive.js";
+import m3u from "./m3u.js";
+import jellyfin from "./jellyfin.js";
 
 // Para sumar un tipo nuevo: crear su archivo en esta carpeta e importarlo acá.
-export const PROVIDER_TYPES = Object.fromEntries([demo].map(def => [def.type, def]));
+export const PROVIDER_TYPES = Object.fromEntries([demo, archive, m3u, jellyfin].map(def => [def.type, def]));
 
 const DEFAULT_INSTANCES = [
+  { id: "archive", type: "archive", enabled: true },
   { id: "demo", type: "demo", enabled: true }
 ];
 
@@ -70,7 +74,8 @@ export function removeInstance(id) {
 // Revisa que la configuración tenga los campos obligatorios. Devuelve una lista de errores.
 export function validateConfig(instance) {
   const def = PROVIDER_TYPES[instance.type];
-  return (def.fields || [])
+  const missing = (def.fields || [])
     .filter(f => f.required && !String(instance.config[f.key] ?? "").trim())
     .map(f => `Falta completar "${f.label}".`);
+  return [...missing, ...(def.validate?.(instance.config) || [])];
 }

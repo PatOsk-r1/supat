@@ -1,0 +1,7 @@
+#EXTM3U url-tvg="http://localhost:5174/tests/fixtures/guia-prueba.xml"
+#EXTINF:-1 tvg-id="prueba.1" tvg-chno="1" group-title="Pruebas",Señal de prueba HLS (Apple, fMP4)
+https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8
+#EXTINF:-1 tvg-id="prueba.2" tvg-chno="2" group-title="Pruebas",Señal de prueba HLS (Apple, TS)
+https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_16x9/bipbop_16x9_variant.m3u8
+#EXTINF:-1 tvg-id="prueba.3" tvg-chno="3" group-title="Errores",Canal que no responde
+https://ejemplo.invalid/no-existe.m3u8

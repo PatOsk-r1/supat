@@ -2,7 +2,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const data = {};
+// Solo el proveedor de demostración: las pruebas no deben depender de internet.
+const data = { "xuper-web:ajustes": JSON.stringify({ providers: [{ id: "demo", type: "demo", enabled: true }] }) };
 globalThis.localStorage = {
   getItem: k => (k in data ? data[k] : null),
   setItem: (k, v) => { data[k] = String(v); },
@@ -103,8 +104,17 @@ test("favoritos: datos dañados no rompen la app", () => {
   assert.equal(createFavorites().size, 0);
 });
 
-test("proveedores: agregar valida campos obligatorios y quitar", () => {
-  const list = registry.getInstances();
-  assert.equal(list[0].id, "demo");
-  assert.deepEqual(registry.validateConfig(list[0]), []);
+test("proveedores: agregar, validar campos obligatorios y quitar", () => {
+  assert.deepEqual(registry.validateConfig(registry.getInstance("demo")), []);
+  const jf = registry.addInstance("jellyfin");
+  assert.equal(jf.enabled, false);
+  assert.equal(registry.validateConfig(jf).length, 2);
+  const m3u = registry.addInstance("m3u");
+  assert.match(registry.validateConfig(m3u)[0], /dirección de la lista/);
+  assert.equal(registry.validateConfig(registry.updateInstance(m3u.id, { config: { url: "https://x/l.m3u" } })).length, 0);
+  registry.removeInstance(jf.id);
+  registry.removeInstance(m3u.id);
+  assert.deepEqual(registry.getInstances().map(i => i.id), ["demo"]);
+  // Internet Archive viene activado por defecto para quien no configuró nada.
+  assert.deepEqual(registry.defaultInstances().map(i => [i.id, i.enabled]), [["archive", true], ["demo", true]]);
 });
