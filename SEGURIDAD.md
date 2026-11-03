@@ -45,8 +45,23 @@ Este documento dice qué está aplicado, cómo se probó y qué riesgos quedan. 
 - **Backups**: el plan Spark no tiene exportaciones automáticas de Firestore (necesitan Blaze). No hay copia de seguridad automática de los datos de usuarios.
 - **Ataques XSS**: si alguien lograra inyectar código en la página, podría usar la sesión del usuario. Lo mitigan la CSP estricta (`script-src 'self'`) y que todos los textos se escapan antes de mostrarse.
 - **Dependencias**: `npm audit` informa 5 alertas en `@grpc/grpc-js`, que usa el SDK de Firestore solo en Node (las pruebas), no en el navegador. Revisar cuando Firebase publique una actualización.
-- **Claves de proveedores** (TMDb, Jellyfin): siguen guardadas en el navegador de cada usuario, porque no hay backend.
+- **Claves de proveedores del navegador** (TMDb, Jellyfin, listas M3U): siguen guardadas en el navegador de cada usuario. Las del **catálogo central** se guardan cifradas en el servidor; ver la sección siguiente.
 - Los límites gratuitos del plan Spark (lecturas y escrituras por día) pueden alcanzarse si hay muchos usuarios.
+
+## Catálogo central (servidor en Cloudflare)
+
+Detalle completo en [worker/README.md](worker/README.md). Resumen:
+
+- **Sesión:** cada pedido a la API lleva el token de Firebase. El servidor verifica la firma con las claves públicas de Google, el proyecto, el vencimiento y que la sesión no tenga más de 30 días.
+- **Roles:** `owner` y `user` se guardan en el servidor. Los propietarios iniciales salen de `OWNER_UIDS`, en la configuración del Worker. Nadie puede asignarse un rol: un dato agregado al token se ignora y nadie cambia su propio rol.
+- **Cuentas:** se respetan la suspensión y "cerrar todas las sesiones". El servidor lee el perfil de Firestore con el token del propio usuario, cada 5 minutos como máximo.
+- **Credenciales de proveedores:** se guardan cifradas con AES-GCM. La clave `SECRETS_KEY` es un secreto del Worker y no está en el repositorio. Nunca se devuelven al navegador ni aparecen en registros, auditoría o errores. Una fuente cuya dirección contiene la credencial no se entrega.
+- **Auditoría:** cada acción del propietario queda registrada (quién, qué, sobre qué y qué campos), sin valores secretos.
+- **CORS:** solo los sitios de `ALLOWED_ORIGINS` pueden usar la API desde el navegador. Los cambios desde otro origen se rechazan.
+- **Pendiente:**
+  - No hay límite de pedidos por usuario en la API.
+  - El bloqueo del catálogo central es aparte de la suspensión de Firestore.
+  - Si Firestore no responde, se usa el último estado conocido de la cuenta.
 
 ## Probar localmente
 

@@ -10,6 +10,21 @@ Todo lo que se reproduce viene de proveedores que configurás vos y que tenés p
 
 Registro con correo y contraseña, verificación del correo, recuperación y cambio de contraseña, cerrar todas las sesiones y eliminar la cuenta. Con una cuenta se guardan **favoritos, listas (privadas o públicas) e historial**, y se ven en cualquier dispositivo. El catálogo se explora sin cuenta. La seguridad está explicada en **[SEGURIDAD.md](SEGURIDAD.md)**.
 
+## Catálogo central (servidor)
+
+Un catálogo **compartido por todos los usuarios**, con un servidor en Cloudflare Workers y una base D1, ambos gratuitos. El propietario incorpora proveedores desde **Perfil → Panel de administración**: los configura, prueba la conexión, los activa y los sincroniza.
+
+El servidor se encarga de:
+
+- **Importar los títulos por tandas:** el proceso se puede retomar si se corta y reintenta solo ante fallas temporales.
+- **Actualizar todos los días** de forma automática.
+- **Unir duplicados** usando los identificadores de TMDb e IMDb.
+- **Resolver la fuente** al reproducir. Las credenciales de los proveedores quedan solo en el servidor.
+
+En la app aparece como el proveedor "Catálogo central de Supat". Necesita iniciar sesión con el correo verificado. Los proveedores del navegador siguen igual.
+
+Detalles, instalación y publicación: **[worker/README.md](worker/README.md)**.
+
 ## Cómo abrirla en tu PC (Windows)
 
 1. Instalá [Node.js](https://nodejs.org) (gratis; versión 20 o más nueva).
@@ -76,6 +91,7 @@ src/
   providers/   un archivo por tipo de proveedor + registro + lectores M3U y XMLTV
   player/      motor (hls.js / nativo) y reproductor con controles
   ui/          controlador (app.js), piezas reutilizables y una vista por pantalla
+worker/        API del catálogo central (Cloudflare Worker + D1): ver worker/README.md
 tests/         pruebas automáticas (node --test) y archivos de prueba
 ```
 

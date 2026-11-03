@@ -68,7 +68,10 @@ export default {
 
 ## Credenciales
 
-La app todavía no tiene servidor, así que hoy la configuración de cada proveedor se guarda **en el navegador** de quien la carga. No uses claves que no deban quedar en ese equipo. Cuando exista el backend, los campos secretos pasarán a guardarse en el servidor (variables de entorno o base de datos), y el adaptador correrá ahí sin cambiar su contrato.
+Hay dos lugares para un proveedor:
+
+- **Proveedores del navegador** (este documento): la configuración se guarda en el navegador de quien la carga. No uses claves que no deban quedar en ese equipo.
+- **Catálogo central** (servidor): las credenciales se guardan cifradas en el servidor y nunca llegan al navegador. Se configuran desde el panel del propietario. Los adaptadores del servidor tienen su propio contrato, en `worker/src/providers/contract.js`. Además hay un **adaptador genérico** para cualquier API que responda JSON, que se describe con una especificación y no necesita código. Ver **[worker/README.md](worker/README.md)**.
 
 ## Pruebas
 

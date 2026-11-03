@@ -62,8 +62,9 @@ for (let i = 0; i < 20 && ["queued", "running"].includes(job.status); i++) job =
 assert.equal(job.status, "done", job.lastError);
 step(`importación completa en D1 local: ${job.pages} páginas, ${job.created} títulos nuevos, ${job.episodes} episodios`);
 
-const movies = (await call("GET", "/api/catalog/titles?kind=movie", user)).body.items;
-assert.equal(movies.length, 3);
+// La base local puede tener títulos de corridas anteriores u otros proveedores: se buscan los de este.
+const movies = (await call("GET", "/api/catalog/titles?kind=movie&pageSize=200", user)).body.items;
+for (const t of ["La Película Uno", "Canción de Otoño", "Ñandú Veloz"]) assert.equal(movies.filter(m => m.title === t).length, 1, `${t} (sin duplicar)`);
 const found = (await call("GET", "/api/catalog/search?q=nandu", user)).body.items;
 assert.deepEqual(found.map(t => t.title), ["Ñandú Veloz"]);
 step("catálogo y búsqueda FTS5 (sin acentos) en D1 local");

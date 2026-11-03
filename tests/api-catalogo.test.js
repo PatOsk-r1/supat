@@ -270,3 +270,28 @@ test("especificación genérica: valida credenciales fuera de 'auth', https, rut
   const ctx2 = { ...ctx, fetch: async () => new Response(JSON.stringify({ items: [{ id: 1, t: "a" }], next: `${BASE}/list?after=1` })) };
   assert.deepEqual((await genericHttp.listPage(ctx2, { kind: "movie" })).next, { link: "/v1/list?after=1", n: 1 });
 });
+
+test("cron: a las 05:00 crea un trabajo por proveedor diario (no los manuales) y cada 10 minutos los sigue", async () => {
+  const env = makeEnv();
+  const net = providerNet();
+  const daily = await addProvider(env, net);
+  const manual = await addProvider(env, net, { label: "Manual" });
+  await api(env, "PATCH", `/api/admin/providers/${manual}`, { ...OWNER, body: { schedule: "manual" } });
+  const worker = (await import("../worker/src/index.js")).default;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = net; // el cron usa el fetch global
+  try {
+    const run = async cron => { const tasks = []; await worker.scheduled({ cron }, env, { waitUntil: p => tasks.push(p) }); await Promise.all(tasks); };
+    await run("*/10 * * * *");
+    assert.equal(env.DB.sqlite.prepare("SELECT COUNT(*) n FROM sync_jobs").get().n, 0, "sin trabajos pendientes no hace nada");
+    await run("0 5 * * *");
+    const jobs = env.DB.sqlite.prepare("SELECT provider_id, trigger, mode FROM sync_jobs").all();
+    assert.deepEqual(jobs.map(j => [j.provider_id, j.trigger, j.mode]), [[daily, "cron", "full"]]); // primera vez: completa
+    for (let i = 0; i < 10; i++) await run("*/10 * * * *");
+    assert.equal(env.DB.sqlite.prepare("SELECT status FROM sync_jobs").get().status, "done");
+    await run("0 5 * * *");
+    assert.equal(env.DB.sqlite.prepare("SELECT mode FROM sync_jobs ORDER BY id DESC").get().mode, "incremental");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

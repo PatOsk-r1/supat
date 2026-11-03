@@ -66,6 +66,42 @@ Peso de la app: 29 kB comprimidos (+ 6 kB de estilos). hls.js (119 kB) se descar
 3. Si la lista principal de una transmisión no respondía, el reproductor quedaba cargando para siempre.
 4. El botón grande ▶ podía pausar en vez de reproducir.
 
+## 7. Catálogo central (2026-11-03)
+
+### Pruebas automáticas: 75 de 75 pasan
+
+Son las 47 anteriores más 28 nuevas, y corren sin red.
+
+| Archivo | Qué cubre |
+|---|---|
+| `tests/api-auth.test.js` | **Sesión:** firma, proyecto, vencimiento, 30 días y tokens del emulador solo en localhost. **Permisos:** sin sesión todo da 401, el usuario común no entra al panel, nadie se da permisos (por el token, por la API ni cambiándose el rol), el dueño promueve y bloquea con auditoría y un dueño por configuración no se puede quitar. **Cuentas:** el correo sin verificar, la suspensión y "cerrar todas las sesiones". **CORS.** |
+| `tests/api-catalogo.test.js` | **Credenciales:** se guardan cifradas y no aparecen en respuestas, registros, auditoría ni trabajos; sin `SECRETS_KEY` no se guardan. **Proveedores:** prueba de conexión. **Importación:** por tandas, reanudable y con menos de 50 consultas a D1 por tanda; reintentos ante 503, falla después de 5 intentos y 400 sin reintento; no se duplican trabajos. **Catálogo:** duplicados unidos por TMDb/IMDb, incremental con `since` y sin reescribir lo igual, bajas sin borrar, búsqueda paginada sin acentos. **Reproducción:** fuente pedida al proveedor, episodio directo e iframe de un origen no declarado. **Otros:** proveedor desactivado, validación de la especificación genérica y cron (el diario crea trabajos solo para los proveedores diarios; el de 10 minutos los termina). |
+| `tests/central-cliente.test.js` | El proveedor del navegador cumple el contrato, la conversión de títulos y el correo enmascarado en el panel. |
+
+### Pruebas reales en local
+
+- **Motor real de Cloudflare:** la API corrió en Wrangler 4.157, con workerd y D1 local. La migración se aplicó, incluido el índice FTS5.
+- **`node tests/e2e-api.mjs`, todo bien:** se usaron cuentas reales del emulador de Firebase Auth y un proveedor de prueba local. Se comprobaron los roles, que el usuario común no puede entrar al panel y que la credencial no aparece en las respuestas. También la prueba de conexión, la importación completa (6 páginas, 5 títulos, 3 episodios) y la búsqueda FTS5. Por último, la reproducción: la dirección con la clave no se entrega, y temporadas y registros están bien.
+- **Cron en workerd** (`wrangler dev --test-scheduled`): la tarea de las 05:00 creó un trabajo incremental por proveedor y la de cada 10 minutos los terminó. En Internet Archive, los 40 títulos quedaron sin cambios y no se reescribieron.
+- **Internet Archive real** (archive.org, por la API local): la prueba de conexión dio 20 títulos. La importación trajo 40 títulos en 2 páginas, la reproducción se resolvió a un MP4 real y archive.org respondió 200 `video/mp4`.
+- **Interfaz** (navegador integrado, `npm run dev:emu`):
+  - **Panel del propietario:** probar conexión, sincronizar, continuar hasta terminar, bloquear y desbloquear un usuario (la API devolvió 403 mientras estuvo bloqueado), registros, auditoría e infraestructura.
+  - **Catálogo:** la ficha de una serie con dos temporadas, la búsqueda y Ajustes.
+  - **Usuario común:** ve 43 películas del catálogo central y no tiene acceso al panel.
+
+### Hallazgos corregidos
+
+1. Una página vacía (`[]`) se tomaba como "la respuesta no tiene lista" y cortaba la importación.
+2. Una serie con episodios inaccesibles (404) hacía fallar todo el trabajo. Ahora se registra y se sigue.
+3. El mensaje de resultado de algunas acciones del panel se borraba al terminar.
+
+### No verificado en el catálogo central
+
+- **Publicación en Cloudflare:** necesita la cuenta del propietario (ver worker/README.md → Publicar). Las claves públicas reales de Google y Firestore real solo se probaron con datos simulados.
+- **Programador real de Cloudflare:** las tareas programadas se dispararon a mano en workerd; falta verlas correr solas una vez publicado.
+- **Ver el video en este navegador:** el reproductor recibe la dirección correcta, pero el navegador integrado no carga videos de archive.org. Con el proveedor anterior pasa exactamente lo mismo.
+- **Proveedor externo real con credenciales:** no hay ninguno configurado. Se probó con un proveedor inventado.
+
 ## 6. No verificado
 
 - Pantalla completa: el navegador integrado de la app no la permite; el código maneja el rechazo. Falta probar en Chrome/Edge.
