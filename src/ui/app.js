@@ -11,6 +11,7 @@ import * as enrich from "../catalog/enrich.js";
 import { addInstance, updateInstance, removeInstance, getInstance, validateConfig } from "../providers/registry.js";
 import * as home from "./views/home.js";
 import * as browse from "./views/browse.js";
+import * as live from "./views/live.js";
 import * as detail from "./views/detail.js";
 import * as watch from "./views/watch.js";
 import * as settingsView from "./views/settings.js";
@@ -58,7 +59,7 @@ export function startApp(app, extensions = {}) {
     if (route.name === "titulo") return detail.render(ctx, route);
     if (route.name === "ver") return watch.render(ctx, route);
     const section = SECTIONS.find(s => s.id === route.name);
-    return (ctx.sectionView?.(ctx, section)) || browse.render(ctx, section);
+    return section.kind === "live" ? live.render(ctx, section) : browse.render(ctx, section);
   }
 
   function render({ focusHeading = false } = {}) {
@@ -89,7 +90,7 @@ export function startApp(app, extensions = {}) {
   // Redibuja como mucho una vez por cuadro. En la pantalla de reproducción no se redibuja
   // por cambios de catálogo, para no cortar el video.
   function queueRender() {
-    if (renderQueued || (state.route.name === "ver" && !state.query)) return;
+    if (renderQueued || (view.querySelector(".xp") && !state.query)) return;
     renderQueued = true;
     requestAnimationFrame(() => { renderQueued = false; render(); });
   }
@@ -142,6 +143,13 @@ export function startApp(app, extensions = {}) {
     },
     season: el => { state.season = Number(el.dataset.index); render(); },
     "play-restart": () => { state.restartRequested = true; },
+    // En PC el canal se reproduce en la vista previa; en el celular abre la pantalla de reproducción.
+    "live-select": (el, ev) => {
+      if (window.matchMedia("(max-width: 720px)").matches) return;
+      ev.preventDefault();
+      state.liveSelected = el.dataset.id;
+      render();
+    },
     "provider-refresh": async el => { await catalog.load({ only: el.dataset.id }); render(); },
     "provider-remove": el => {
       const key = `remove:${el.dataset.id}`;
@@ -238,8 +246,34 @@ export function startApp(app, extensions = {}) {
     if (ev.key === "/" && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) {
       ev.preventDefault();
       search.focus();
+    } else if (ev.key.startsWith("Arrow") && !ev.altKey && !ev.ctrlKey && document.activeElement.matches(SPATIAL_FROM)) {
+      if (moveFocus(ev.key)) ev.preventDefault();
     }
   });
+
+  // Navegación con flechas entre tarjetas, como con el control remoto de una app de TV:
+  // busca el elemento más cercano en la dirección de la flecha.
+  const SPATIAL_FROM = ".poster, .channel-logo, .wide-thumb, .ch-link, .episode-link, .nav-item, .cat";
+  const SPATIAL_TO = SPATIAL_FROM + ", #view .primary, #view .secondary, #view .filter, #view .see-all";
+  function moveFocus(key) {
+    const current = document.activeElement.getBoundingClientRect();
+    const cx = current.left + current.width / 2, cy = current.top + current.height / 2;
+    const horizontal = key === "ArrowLeft" || key === "ArrowRight";
+    let best = null, bestScore = Infinity;
+    for (const el of app.querySelectorAll(SPATIAL_TO)) {
+      if (el === document.activeElement || !el.offsetParent) continue;
+      const r = el.getBoundingClientRect();
+      const dx = r.left + r.width / 2 - cx, dy = r.top + r.height / 2 - cy;
+      const along = { ArrowRight: dx, ArrowLeft: -dx, ArrowDown: dy, ArrowUp: -dy }[key];
+      if (along <= 4) continue;
+      const score = along + (horizontal ? Math.abs(dy) : Math.abs(dx)) * 3;
+      if (score < bestScore) { bestScore = score; best = el; }
+    }
+    if (!best) return false;
+    best.focus({ preventScroll: true });
+    best.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+    return true;
+  }
 
   // ---------- rutas ----------
   // Cada entrada del historial guarda su "profundidad" dentro de la app,

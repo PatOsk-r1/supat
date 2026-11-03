@@ -9,6 +9,7 @@ let byId = new Map();
 const status = new Map();   // id de proveedor → { state, count, updatedAt, error, fromCache }
 const listeners = new Set();
 const seasonsCache = new Map();
+const epg = new Map();      // id de proveedor → { idDeCanal: [{ start, stop, title, description }] }
 
 function emit() { listeners.forEach(fn => fn()); }
 
@@ -32,21 +33,24 @@ async function loadInstance(instance, force) {
   const fresh = cached && cached.configHash === JSON.stringify(instance.config) && Date.now() - cached.updatedAt < provider.ttl;
   if (cached && fresh && !force) {
     status.set(instance.id, { state: "ok", count: cached.items.length, updatedAt: cached.updatedAt, fromCache: true });
+    if (cached.epg) epg.set(instance.id, cached.epg);
     return cached.items;
   }
 
   status.set(instance.id, { ...(status.get(instance.id) || {}), state: "loading" });
   emit();
   try {
-    const result = await provider.load(instance.config);
+    const result = await provider.load(instance.config, { instanceId: instance.id });
     const list = (result.items || []).map(raw => normalizeItem(raw, instance, provider)).filter(Boolean);
     const updatedAt = Date.now();
-    if (provider.ttl) await cacheSet(key, { items: list, updatedAt, configHash: JSON.stringify(instance.config) });
+    if (result.epg) epg.set(instance.id, result.epg); else epg.delete(instance.id);
+    if (provider.ttl) await cacheSet(key, { items: list, epg: result.epg || null, updatedAt, configHash: JSON.stringify(instance.config) });
     status.set(instance.id, { state: "ok", count: list.length, updatedAt, warning: result.warning || "" });
     return list;
   } catch (err) {
     const message = err?.message || "Error desconocido.";
     if (cached) {
+      if (cached.epg) epg.set(instance.id, cached.epg);
       status.set(instance.id, { state: "error", count: cached.items.length, updatedAt: cached.updatedAt, fromCache: true, error: `${message} Se muestra la última copia guardada.` });
       return cached.items;
     }
@@ -82,6 +86,17 @@ export const catalog = {
     const count = new Map();
     for (const x of items) if (x.kind === kind) for (const c of x.categories) count.set(c, (count.get(c) || 0) + 1);
     return [...count.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "es")).map(([c]) => c);
+  },
+  // Programa actual y siguiente de un canal, según la guía (XMLTV) de su proveedor.
+  nowNext(item, now = Date.now()) {
+    const list = epg.get(item.providerId)?.[item.tvgId || item.rawId];
+    if (!list?.length) return { now: null, next: null };
+    const i = list.findIndex(p => p.start <= now && now < p.stop);
+    if (i >= 0) return { now: list[i], next: list[i + 1] || null };
+    return { now: null, next: list.find(p => p.start > now) || null };
+  },
+  schedule(item) {
+    return epg.get(item.providerId)?.[item.tvgId || item.rawId] || [];
   },
   subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
   async clearCache(id) {
