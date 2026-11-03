@@ -4,7 +4,13 @@ Aplicación web de streaming: TV en vivo, películas, series y anime.
 Es una **aplicación independiente**: **no trae canales, credenciales ni fuentes privadas**.
 Todo lo que se reproduce viene de proveedores que configurás vos y que tenés permiso de usar.
 
-## Cómo abrirla (Windows)
+**Abrir en línea:** https://supat-h8tfw.web.app
+
+## Cuentas de usuario
+
+Registro con correo y contraseña, verificación del correo, recuperación y cambio de contraseña, cerrar todas las sesiones y eliminar la cuenta. Con una cuenta se guardan **favoritos, listas (privadas o públicas) e historial**, y se ven en cualquier dispositivo. El catálogo se explora sin cuenta. La seguridad está explicada en **[SEGURIDAD.md](SEGURIDAD.md)**.
+
+## Cómo abrirla en tu PC (Windows)
 
 1. Instalá [Node.js](https://nodejs.org) (gratis; versión 20 o más nueva).
 2. Hacé doble clic en **`Abrir Supat.cmd`**. La primera vez instala lo necesario; después abre el navegador.
@@ -24,6 +30,9 @@ En **PowerShell** escribí `npm.cmd` en vez de `npm` (por ejemplo `npm.cmd run d
 | `npm run dev` | Abre la app en tu PC (solo accesible desde tu PC). |
 | `npm run dev:red` | Igual, pero accesible desde otros dispositivos de tu wifi (por ejemplo, el celular). |
 | `npm test` | Pruebas automáticas (ver PRUEBAS.md). |
+| `npm run test:reglas` | Pruebas de seguridad de las reglas en el emulador (requiere Java). |
+| `npm run emuladores` + `npm run dev:emu` | La app contra los emuladores locales de Firebase, con cuentas de prueba. |
+| `firebase deploy --only hosting,firestore:rules` | Publica la app y las reglas en Firebase. |
 | `npm run build` | Versión final optimizada en `dist/`. |
 | `npm run page` | Arma `publish/supat.html`, una vista previa de un solo archivo (solo con contenido de demostración). |
 
