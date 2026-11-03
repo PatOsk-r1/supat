@@ -1,8 +1,8 @@
 import "./style.css";
 import { loadCatalog, KINDS } from "./catalog/index.js";
-import { createFavorites } from "./favorites.js";
-import { mountPlayer } from "./player.js";
-import { escapeHtml as e } from "./util.js";
+import { createFavorites } from "./app/favorites.js";
+import { mountPlayer } from "./player/player.js";
+import { escapeHtml as e } from "./app/util.js";
 
 // Secciones del menú. `kind` indica qué tipo de contenido muestra cada una.
 const SECTIONS = [

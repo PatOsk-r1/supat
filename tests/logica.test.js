@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { loadCatalog, KINDS } from "../src/catalog/index.js";
 import { demoItems } from "../src/catalog/demo-data.js";
-import { escapeHtml } from "../src/util.js";
+import { escapeHtml } from "../src/app/util.js";
 
 // Simula el almacenamiento del navegador para probar favoritos en Node.
 function fakeStorage(initial = {}, { broken = false } = {}) {
@@ -47,7 +47,7 @@ test("escapeHtml neutraliza código HTML", () => {
 
 test("favoritos: agregar, quitar y recordar entre aperturas", async () => {
   const data = fakeStorage();
-  const { createFavorites } = await import("../src/favorites.js");
+  const { createFavorites } = await import("../src/app/favorites.js");
   const fav = createFavorites();
   assert.equal(fav.toggle("demo:1"), true);
   assert.equal(fav.has("demo:1"), true);
@@ -60,14 +60,14 @@ test("favoritos: agregar, quitar y recordar entre aperturas", async () => {
 
 test("favoritos: datos dañados no rompen la app", async () => {
   fakeStorage({ "xuper-web:favoritos": "{esto no es json" });
-  const { createFavorites } = await import("../src/favorites.js");
+  const { createFavorites } = await import("../src/app/favorites.js");
   const fav = createFavorites();
   assert.equal(fav.size, 0);
 });
 
 test("favoritos: si el navegador bloquea el almacenamiento, avisa y sigue funcionando", async () => {
   fakeStorage({}, { broken: true });
-  const { createFavorites } = await import("../src/favorites.js");
+  const { createFavorites } = await import("../src/app/favorites.js");
   const fav = createFavorites();
   assert.equal(fav.persistent, false);
   assert.equal(fav.toggle("demo:2"), true);

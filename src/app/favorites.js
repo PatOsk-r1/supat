@@ -28,6 +28,8 @@ export function createFavorites() {
       save();
       return ids.has(id);
     },
+    list: () => [...ids],
+    clear() { ids.clear(); save(); },
     get size() { return ids.size; },
     get persistent() { return persistent; }
   };

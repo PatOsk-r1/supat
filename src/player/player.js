@@ -1,7 +1,7 @@
 // Reproductor separado del catálogo: recibe un elemento y un contenedor, y se encarga
 // de mostrar el video o un mensaje honesto. Nunca muestra "reproduciendo" si el video
 // no arrancó de verdad. Devuelve una función para limpiar al salir de la vista.
-import { escapeHtml } from "./util.js";
+import { escapeHtml } from "../app/util.js";
 
 const HLS = "application/x-mpegurl";
 
