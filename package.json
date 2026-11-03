@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "node --test \"tests/*.test.js\"",
+    "page": "vite build && node scripts/build-page.mjs"
   },
   "dependencies": {
     "vite": "^6.1.0"

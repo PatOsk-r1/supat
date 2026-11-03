@@ -13,6 +13,13 @@ npm run dev
 ```
 Abrir la URL local que indique Vite.
 
+Otros comandos:
+- `npm test`: pruebas automáticas (ver PRUEBAS.md).
+- `npm run build`: versión final en `dist/`.
+- `npm run page`: compila y arma `publish/xuper-web.html`, un único archivo para compartir la vista previa.
+
+**En Windows con PowerShell** escribí `npm.cmd` en vez de `npm` (por ejemplo `npm.cmd run dev`). PowerShell bloquea `npm.ps1` por su política de scripts. En CMD o Git Bash funciona `npm` normal.
+
 ## Estado
 - Interfaz responsive (PC, tablet y celular) con menú lateral, que pasa a barra inferior en el celular.
 - Secciones: Inicio (destacado + filas), TV en vivo, Películas, Series y Favoritos. La dirección cambia (#/tv, #/peliculas...), así que funciona el botón Atrás.

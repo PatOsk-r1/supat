@@ -128,7 +128,7 @@ function playerView(item) {
 
 // ---------- Dibujo ----------
 function renderShell() {
-  app.innerHTML = `<a class="skip" href="#view">Saltar al contenido</a>
+  app.innerHTML = `<a class="skip" href="#view" data-skip>Saltar al contenido</a>
   <aside class="sidebar">
     <a class="brand" href="#/inicio"><span class="brand-icon">X</span><span>XUPER<span class="brand-light">WEB</span></span></a>
     <nav aria-label="Secciones">${SECTIONS.map(s =>
@@ -150,6 +150,10 @@ function renderShell() {
   search.addEventListener("input", () => { state.query = search.value; renderView(); });
   search.addEventListener("keydown", ev => { if (ev.key === "Escape") { search.value = ""; state.query = ""; renderView(); } });
   app.querySelector("#view").addEventListener("click", onViewClick);
+  // El enlace de salto solo mueve el foco; no debe cambiar de sección.
+  app.querySelector("[data-skip]").addEventListener("click", ev => { ev.preventDefault(); app.querySelector("#view").focus(); });
+  // Si una imagen del catálogo no carga, se quita y queda el degradado de respaldo.
+  app.querySelector("#view").addEventListener("error", ev => { if (ev.target.tagName === "IMG") ev.target.remove(); }, true);
 }
 
 function renderView({ focusHeading = false } = {}) {
@@ -192,7 +196,7 @@ function onViewClick(ev) {
   const cat = ev.target.closest("[data-category]");
   if (cat) { state.category = cat.dataset.category; renderView(); return; }
   if (ev.target.closest("[data-clear-search]")) { clearSearch(); app.querySelector("#search").focus(); return; }
-  if (ev.target.closest("[data-back]")) { history.length > 1 ? history.back() : (location.hash = "#/inicio"); }
+  if (ev.target.closest("[data-back]")) { (history.state?.depth ?? 0) > 0 ? history.back() : (location.hash = "#/inicio"); }
 }
 
 function clearSearch() {
@@ -201,7 +205,12 @@ function clearSearch() {
   renderView();
 }
 
+// Cada entrada del historial guarda su "profundidad" dentro de la app.
+// Así "Volver" solo retrocede si la página anterior también es de la app.
+let depth = 0;
 window.addEventListener("hashchange", () => {
+  if (history.state?.depth == null) history.replaceState({ depth: depth + 1 }, "");
+  depth = history.state.depth;
   const previous = state.route.name;
   state.route = parseRoute();
   if (state.route.name !== previous) state.category = "Todos";
@@ -219,6 +228,8 @@ document.addEventListener("keydown", ev => {
 });
 
 // ---------- Inicio ----------
+history.replaceState({ depth: history.state?.depth ?? 0 }, "");
+depth = history.state.depth;
 state.route = parseRoute();
 renderShell();
 renderView();

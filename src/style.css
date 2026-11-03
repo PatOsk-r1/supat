@@ -6,7 +6,7 @@
   --line: #ffffff14;
   --text: #f5f5f7;
   --muted: #a9a7b3;
-  --faint: #6f6a7b;
+  --faint: #8d889a;
   --accent: #9a70ff;
   --accent-soft: #b8a1ff;
   --sidebar: 230px;
@@ -125,6 +125,10 @@ main { flex: 1; padding: 28px 4vw 40px; }
 
 footer { padding: 26px 4vw 34px; border-top: 1px solid #ffffff0d; color: #b7a0ef; font-size: 10px; font-weight: 800; letter-spacing: 1.5px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 footer span { color: var(--faint); font-weight: 400; letter-spacing: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+}
 
 /* Tablet */
 @media (max-width: 1000px) {
