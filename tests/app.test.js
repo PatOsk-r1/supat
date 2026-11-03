@@ -3,11 +3,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 // Almacenamiento falso (en Node no existe localStorage). Se crea antes de importar los módulos.
-const data = {};
+// Un dato guardado con el nombre anterior de la app, para probar que se migra.
+const data = { "xuper-web:progreso": JSON.stringify({ viejo: { time: 0, duration: 100, finished: true, updatedAt: 1 } }) };
 globalThis.localStorage = {
   getItem: k => (k in data ? data[k] : null),
   setItem: (k, v) => { data[k] = String(v); },
-  removeItem: k => { delete data[k]; }
+  removeItem: k => { delete data[k]; },
+  key: i => Object.keys(data)[i] ?? null,
+  get length() { return Object.keys(data).length; }
 };
 
 const { parseRoute, hrefFor } = await import("../src/app/router.js");
@@ -37,7 +40,7 @@ test("ajustes: valores por defecto, cambios guardados y aviso a los suscriptores
   const off = settings.onChange((k, v) => { notified = [k, v]; });
   settings.set("language", "es-AR");
   assert.deepEqual(notified, ["language", "es-AR"]);
-  assert.equal(JSON.parse(data["xuper-web:ajustes"]).language, "es-AR");
+  assert.equal(JSON.parse(data["supat:ajustes"]).language, "es-AR");
   off();
   settings.reset();
   assert.equal(settings.get("language"), "es-ES");
@@ -60,4 +63,9 @@ test("caché: guarda y borra (en Node usa memoria)", async () => {
   assert.deepEqual(await cacheGet("k"), { n: 1 });
   await cacheDelete("k");
   assert.equal(await cacheGet("k"), undefined);
+});
+
+test("los datos guardados con el nombre anterior (xuper-web) pasan a las claves nuevas", () => {
+  assert.equal(data["xuper-web:progreso"], undefined);
+  assert.ok(JSON.parse(data["supat:progreso"]).viejo);
 });

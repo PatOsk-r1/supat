@@ -1,7 +1,7 @@
 // "Seguir viendo": recuerda por dónde iba cada película o episodio.
 import { readJSON, writeJSON } from "./storage.js";
 
-const KEY = "xuper-web:progreso";
+const KEY = "supat:progreso";
 const MAX_ENTRIES = 200;
 const MIN_SECONDS = 10;      // menos que esto no cuenta como "empezado"
 const FINISHED_RATIO = 0.95; // pasado el 95 % se considera terminado

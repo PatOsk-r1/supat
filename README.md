@@ -1,13 +1,13 @@
-# Xuper Web
+# Supat
 
-Aplicación web de streaming (TV en vivo, películas y series) con una experiencia inspirada en las apps de IPTV como Xuper TV.
-Es un **prototipo independiente y no oficial**, sin relación con Xuper TV: **no trae canales, credenciales ni fuentes privadas**.
+Aplicación web de streaming: TV en vivo, películas, series y anime.
+Es una **aplicación independiente**: **no trae canales, credenciales ni fuentes privadas**.
 Todo lo que se reproduce viene de proveedores que configurás vos y que tenés permiso de usar.
 
 ## Cómo abrirla (Windows)
 
 1. Instalá [Node.js](https://nodejs.org) (gratis; versión 20 o más nueva).
-2. Hacé doble clic en **`Abrir Xuper Web.cmd`**. La primera vez instala lo necesario; después abre el navegador.
+2. Hacé doble clic en **`Abrir Supat.cmd`**. La primera vez instala lo necesario; después abre el navegador.
 3. Para apagarla, cerrá la ventana negra.
 
 Por consola:
@@ -25,7 +25,7 @@ En **PowerShell** escribí `npm.cmd` en vez de `npm` (por ejemplo `npm.cmd run d
 | `npm run dev:red` | Igual, pero accesible desde otros dispositivos de tu wifi (por ejemplo, el celular). |
 | `npm test` | Pruebas automáticas (ver PRUEBAS.md). |
 | `npm run build` | Versión final optimizada en `dist/`. |
-| `npm run page` | Arma `publish/xuper-web.html`, una vista previa de un solo archivo (solo con contenido de demostración). |
+| `npm run page` | Arma `publish/supat.html`, una vista previa de un solo archivo (solo con contenido de demostración). |
 
 ## Qué tiene
 

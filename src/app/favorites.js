@@ -1,7 +1,8 @@
 // Favoritos guardados en el navegador (localStorage).
+import "./storage.js"; // asegura la migración de claves antes de leer
 // Si el navegador bloquea el almacenamiento (modo privado, permisos), los favoritos
 // funcionan igual mientras la página esté abierta y se avisa con `persistent = false`.
-const KEY = "xuper-web:favoritos";
+const KEY = "supat:favoritos";
 
 export function createFavorites() {
   let ids = new Set();

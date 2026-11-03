@@ -2,7 +2,7 @@
 // La lista de proveedores también vive acá (cuáles hay, si están activos y su configuración).
 import { readJSON, writeJSON } from "./storage.js";
 
-const KEY = "xuper-web:ajustes";
+const KEY = "supat:ajustes";
 
 export const DEFAULT_SETTINGS = {
   language: "es-ES",     // idioma de los metadatos de TMDb

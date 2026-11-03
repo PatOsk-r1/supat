@@ -28,24 +28,24 @@ export function startApp(app, extensions = {}) {
   let renderQueued = false;
 
   // ---------- marco ----------
-  const brand = `<span class="brand-icon">X</span><span class="brand-text">XUPER<span class="brand-light">WEB</span></span>`;
+  const brand = `<span class="brand-icon">S</span><span class="brand-text">SU<span class="brand-light">PAT</span></span>`;
   app.innerHTML = `<a class="skip" href="#view" data-skip>Saltar al contenido</a>
   <aside class="sidebar">
-    <a class="brand" href="#/inicio" aria-label="Xuper Web, inicio">${brand}</a>
+    <a class="brand" href="#/inicio" aria-label="Supat, inicio">${brand}</a>
     <nav aria-label="Secciones">${SECTIONS.map(s =>
       `<a class="nav-item" href="#/${s.id}" data-nav="${s.id}"><span class="nav-icon" aria-hidden="true">${s.icon}</span><span class="nav-label">${s.label}</span></a>`).join("")}
     </nav>
-    <p class="sidebar-note">Prototipo independiente, no oficial. Sin relación con Xuper TV.</p>
+    <p class="sidebar-note">Supat · solo fuentes autorizadas.</p>
   </aside>
   <div class="content">
     <header class="topbar">
-      <a class="brand brand-mobile" href="#/inicio" aria-label="Xuper Web, inicio">${brand}</a>
+      <a class="brand brand-mobile" href="#/inicio" aria-label="Supat, inicio">${brand}</a>
       <label class="search"><span aria-hidden="true">⌕</span><span class="sr-only">Buscar por nombre</span>
         <input id="search" type="search" placeholder="Buscar películas, series y canales…" autocomplete="off" aria-keyshortcuts="/"></label>
     </header>
     ${PREVIEW ? `<p class="preview-banner" role="note">Vista previa publicada: acá solo funciona el contenido de demostración, porque el visor bloquea las conexiones externas. Para películas reales y TV, abrí la app en tu PC (ver README).</p>` : ""}
     <main id="view" tabindex="-1"></main>
-    <footer>XUPER WEB <span>Prototipo independiente · solo fuentes autorizadas · metadatos de TMDb cuando está configurado</span></footer>
+    <footer>SUPAT <span>Prototipo independiente · solo fuentes autorizadas · metadatos de TMDb cuando está configurado</span></footer>
   </div>`;
   const view = app.querySelector("#view");
   const search = app.querySelector("#search");
@@ -79,7 +79,7 @@ export function startApp(app, extensions = {}) {
       ? { title: "Cargando", html: `<div class="empty" role="status"><div class="xp-spinner"></div>Cargando catálogo…</div>` }
       : pickView();
     view.innerHTML = result.html;
-    document.title = `${result.title} · Xuper Web`;
+    document.title = `${result.title} · Supat`;
     if (result.mount) cleanup = result.mount(view, ctx) || (() => {});
 
     const again = focusKey && view.querySelector(`[data-key="${CSS.escape(focusKey)}"]`);

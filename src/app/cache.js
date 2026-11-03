@@ -1,10 +1,13 @@
 // Caché grande en IndexedDB (catálogos de proveedores, guías de programación, datos de TMDb).
 // localStorage solo admite ~5 MB; una lista IPTV puede pesar más, por eso se usa IndexedDB.
 // Si IndexedDB no está disponible (modo privado, Node en las pruebas), se usa memoria.
-const DB_NAME = "xuper-web";
+const DB_NAME = "supat";
 const STORE = "cache";
 const memory = new Map();
 let dbPromise = null;
+
+// La caché del nombre anterior ("xuper-web") ya no se usa: se borra (se vuelve a armar sola).
+try { if (typeof indexedDB !== "undefined") indexedDB.deleteDatabase("xuper-web"); } catch { /* nada que borrar */ }
 
 function openDb() {
   if (typeof indexedDB === "undefined") return Promise.reject(new Error("sin IndexedDB"));

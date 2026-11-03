@@ -5,7 +5,7 @@ import { escapeHtml } from "../app/util.js";
 import { readJSON, writeJSON } from "../app/storage.js";
 import { attachSource, detectType, mseSupported, HLS_TYPE } from "./engine.js";
 
-const VOLUME_KEY = "xuper-web:volumen";
+const VOLUME_KEY = "supat:volumen";
 
 const ERROR_TEXT = {
   unsupported: "Formato no compatible con este navegador",

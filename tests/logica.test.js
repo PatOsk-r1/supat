@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 // Solo el proveedor de demostración: las pruebas no deben depender de internet.
-const data = { "xuper-web:ajustes": JSON.stringify({ providers: [{ id: "demo", type: "demo", enabled: true }] }) };
+const data = { "supat:ajustes": JSON.stringify({ providers: [{ id: "demo", type: "demo", enabled: true }] }) };
 globalThis.localStorage = {
   getItem: k => (k in data ? data[k] : null),
   setItem: (k, v) => { data[k] = String(v); },
@@ -100,7 +100,7 @@ test("favoritos: agregar, quitar y recordar entre aperturas", () => {
 });
 
 test("favoritos: datos dañados no rompen la app", () => {
-  data["xuper-web:favoritos"] = "{esto no es json";
+  data["supat:favoritos"] = "{esto no es json";
   assert.equal(createFavorites().size, 0);
 });
 

@@ -128,7 +128,7 @@ export function render(ctx) {
 
     <section class="settings-block" aria-labelledby="h-about">
       <h2 id="h-about">Acerca de</h2>
-      <p class="note">Xuper Web es un prototipo independiente y no oficial, sin relación con Xuper TV. No incluye fuentes privadas ni contenido protegido:
+      <p class="note">Supat es una aplicación independiente. No incluye fuentes privadas ni contenido protegido:
         todo lo que se reproduce viene de los proveedores configurados acá.</p>
       <p class="note tmdb-credit">Este producto usa la API de TMDb, pero no está respaldado ni certificado por TMDb.</p>
     </section>

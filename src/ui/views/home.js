@@ -18,7 +18,7 @@ function featured(items) {
 function hero(list, ctx) {
   if (!list.length) return "";
   const slides = list.map((item, i) => `<article class="hero-slide ${i === 0 ? "active" : ""}" data-slide="${i}" ${i ? 'aria-hidden="true"' : ""}>
-      <div class="hero-art ${e(item.color)}" aria-hidden="true">${item.backdrop || item.poster ? `<img src="${e(item.backdrop || item.poster)}" alt="" ${i ? 'loading="lazy"' : ""}>` : `<div class="hero-x">X</div>`}</div>
+      <div class="hero-art ${e(item.color)}" aria-hidden="true">${item.backdrop || item.poster ? `<img src="${e(item.backdrop || item.poster)}" alt="" ${i ? 'loading="lazy"' : ""}>` : `<div class="hero-x">S</div>`}</div>
       <div class="hero-content">
         <span class="eyebrow">DESTACADO · ${KINDS[item.kind].label.toUpperCase()}${item.isDemo ? " · DEMO" : ""}</span>
         <h${i === 0 ? "1 tabindex=\"-1\"" : "2"} class="hero-title">${e(item.title)}</h${i === 0 ? 1 : 2}>

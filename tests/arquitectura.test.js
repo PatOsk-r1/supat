@@ -4,7 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const data = { "xuper-web:ajustes": JSON.stringify({ providers: [] }) };
+const data = { "supat:ajustes": JSON.stringify({ providers: [] }) };
 globalThis.localStorage = {
   getItem: k => (k in data ? data[k] : null),
   setItem: (k, v) => { data[k] = String(v); },
