@@ -9,7 +9,8 @@ const date = ms => (ms ? new Date(ms).toLocaleString("es", { dateStyle: "short",
 export function render(ctx) {
   const head = `<div class="section-heading">${heading("ADMINISTRACIÓN", "Panel")}</div>`;
   if (!ctx.account.ready) return { title: "Administración", html: head + `<div class="empty" role="status"><div class="xp-spinner"></div>Conectando…</div>` };
-  if (!ctx.account.isAdmin || !ctx.account.verified) return { title: "Administración", html: head + empty("No tenés acceso a esta sección.") };
+  if (!ctx.account.isAdmin) return { title: "Administración", html: head + empty("No tenés acceso a esta sección.") };
+  if (!ctx.account.verified) return { title: "Administración", html: head + empty("Verificá tu correo para usar el panel.", "Tocá el enlace del mail que te enviamos (revisá spam) y después \"Ya lo verifiqué\" en tu perfil.", `<a class="primary" href="#/perfil">Ir a mi perfil</a>`) };
 
   const data = ctx.state.admin;
   if (!data) {
