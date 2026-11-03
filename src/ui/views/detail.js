@@ -22,6 +22,18 @@ function episodeRow(item, ep, ctx) {
   </li>`;
 }
 
+// "Agregar a una lista": con sesión verificada muestra tus listas; si no, invita a ingresar.
+function addToListForm(item, ctx) {
+  if (!ctx.account?.signedIn) return `<p class="note"><a href="#/cuenta">Ingresá</a> para guardar este título en tus listas.</p>`;
+  if (!ctx.userdata?.active) return "";
+  const lists = ctx.userdata.lists.all();
+  return `<form class="add-list" data-form="add-to-list" data-id="${e(item.id)}">
+    <label for="add-list-sel">Agregar a una lista</label>
+    <select id="add-list-sel" name="list">${lists.map(l => `<option value="${e(l.id)}">${e(l.name)}</option>`).join("")}<option value="__nueva">+ Lista nueva con este título</option></select>
+    <button type="submit" class="secondary">Agregar</button>
+  </form>`;
+}
+
 // "Dónde verla": plataformas legales del país elegido en Ajustes (TMDb + JustWatch).
 function watchHtml(watch) {
   return `<section class="watch-where" aria-labelledby="h-where"><h2 id="h-where">Dónde verla</h2>
@@ -81,6 +93,7 @@ export function render(ctx, route) {
           ${resume ? `<a class="secondary" href="${hrefFor.watch(item)}" data-action="play-restart" data-key="restart">Empezar de nuevo</a>` : ""}
           ${favButton(item, ctx, "fav-big")}
         </div>
+        ${addToListForm(item, ctx)}
         ${info.cast?.length ? `<p class="cast"><strong>Reparto:</strong> ${info.cast.map(e).join(", ")}</p>` : ""}
         ${info.watch ? watchHtml(info.watch) : ""}
         ${info.attribution ? `<p class="attribution">${info.attribution}</p>` : ""}

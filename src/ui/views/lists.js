@@ -1,6 +1,7 @@
 // Favoritos y resultados de búsqueda.
 import { escapeHtml as e } from "../../app/util.js";
 import { cardFor, grid, heading, empty } from "../components.js";
+import { spaceTabs, signInPrompt, verifyPrompt } from "./account.js";
 
 // Quita acentos y pasa a minúsculas, para que "accion" encuentre "Acción".
 export const fold = s => String(s).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -21,13 +22,18 @@ export function searchItems(items, query) {
 }
 
 export function renderFavorites(ctx) {
+  const head = `<div class="section-heading">${heading("MI ESPACIO", "Favoritos")}${spaceTabs("favoritos")}</div>`;
+  const a = ctx.account;
+  if (!a.ready) return { title: "Favoritos", html: head + `<div class="empty" role="status"><div class="xp-spinner"></div>Conectando con tu cuenta…</div>` };
+  if (!a.signedIn) return { title: "Favoritos", html: head + signInPrompt("guardar tus favoritos") };
+  if (a.suspended) return { title: "Favoritos", html: head + empty("Tu cuenta está suspendida.", "No podés guardar ni ver tus datos. Escribinos si creés que es un error.") };
+  if (!a.verified) return { title: "Favoritos", html: head + verifyPrompt(ctx) };
   const items = ctx.catalog.all().filter(x => ctx.favorites.has(x.id));
   const missing = ctx.favorites.size - items.length;
-  const warning = ctx.favorites.persistent ? "" : `<p class="warning">Tu navegador no permite guardar datos: los favoritos se perderán al cerrar la página.</p>`;
   const note = missing > 0 ? `<p class="note">${missing} favorito(s) pertenecen a proveedores desactivados o que no cargaron.</p>` : "";
   return {
     title: "Favoritos",
-    html: `<div class="section-heading">${heading("TU LISTA", "Favoritos")}</div>${warning}${note}
+    html: `${head}${note}
       ${grid(items.map(x => cardFor(x, ctx)).join(""), `<strong>Todavía no tenés favoritos.</strong><span>Tocá el corazón ♡ de cualquier título para guardarlo acá.</span><a class="primary" href="#/inicio">Explorar el catálogo</a>`)}`
   };
 }

@@ -16,13 +16,27 @@ import * as detail from "./views/detail.js";
 import * as watch from "./views/watch.js";
 import * as settingsView from "./views/settings.js";
 import { renderFavorites, renderSearch } from "./views/lists.js";
+import * as accountViews from "./views/account.js";
+import * as adminView from "./views/admin.js";
+import { account } from "../app/account.js";
+import { userdata } from "../app/userdata.js";
+import { admin } from "../app/admin.js";
 
 const defaultFilters = () => ({ category: "Todos", provider: "todos", sort: "destacados", limit: 0 });
 
 export function startApp(app, extensions = {}) {
-  const favorites = createFavorites();
-  const state = { route: parseRoute(location.hash), query: "", filters: defaultFilters(), season: 0, confirm: null, restartRequested: false, tmdbStatus: "" };
-  const ctx = { catalog, favorites, progress, settings, state, ...extensions };
+  // Favoritos y progreso de ANTES de tener cuenta (en este navegador): solo para pasarlos a la cuenta.
+  const localFavorites = createFavorites();
+  // Sin sesión (o sin correo verificado) no se guarda nada: el catálogo se explora igual.
+  const guestFavorites = { persistent: true, has: () => false, list: () => [], size: 0, toggle: async () => false, clear: async () => {} };
+  const guestProgress = { save() {}, flush() {}, get: () => null, resumeTime: () => 0, isFinished: () => false, recent: () => [], all: () => [], remove: async () => {}, clear: async () => {} };
+  const state = { route: parseRoute(location.hash), query: "", filters: defaultFilters(), season: 0, confirm: null, restartRequested: false, tmdbStatus: "", formError: "", formMessage: "", busy: false };
+  const ctx = {
+    catalog, settings, state, account, userdata, admin, ...extensions,
+    get favorites() { return userdata.active ? userdata.favorites : guestFavorites; },
+    get progress() { return userdata.active ? userdata.progress : guestProgress; },
+    localData: { count: () => localFavorites.size + progress.recent(999).length }
+  };
   let cleanup = () => {};
   let depth = 0;
   let renderQueued = false;
@@ -41,7 +55,9 @@ export function startApp(app, extensions = {}) {
       <a class="brand brand-mobile" href="#/inicio" aria-label="Supat, inicio">${brand}</a>
       <label class="search"><span aria-hidden="true">⌕</span><span class="sr-only">Buscar por nombre</span>
         <input id="search" type="search" placeholder="Buscar películas, series y canales…" autocomplete="off" aria-keyshortcuts="/"></label>
+      <a class="account-link" id="account-link" href="#/cuenta">Ingresar</a>
     </header>
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
     ${PREVIEW ? `<p class="preview-banner" role="note">Vista previa publicada: acá solo funciona el contenido de demostración, porque el visor bloquea las conexiones externas. Para películas reales y TV, abrí la app en tu PC (ver README).</p>` : ""}
     <main id="view" tabindex="-1"></main>
     <footer>SUPAT <span>Información e imágenes de TMDb</span></footer>
@@ -58,6 +74,13 @@ export function startApp(app, extensions = {}) {
     if (route.name === "ajustes") return settingsView.render(ctx);
     if (route.name === "titulo") return detail.render(ctx, route);
     if (route.name === "ver") return watch.render(ctx, route);
+    if (route.name === "cuenta") return accountViews.renderAuth(ctx, route);
+    if (route.name === "perfil") return accountViews.renderProfile(ctx);
+    if (route.name === "listas") return accountViews.renderLists(ctx);
+    if (route.name === "lista") return accountViews.renderListDetail(ctx, route);
+    if (route.name === "historial") return accountViews.renderHistory(ctx);
+    if (route.name === "publica") return accountViews.renderPublicList(ctx, route);
+    if (route.name === "admin") return adminView.render(ctx);
     const section = SECTIONS.find(s => s.id === route.name);
     return section.kind === "live" ? live.render(ctx, section) : browse.render(ctx, section);
   }
@@ -110,8 +133,29 @@ export function startApp(app, extensions = {}) {
   });
 
   // ---------- acciones ----------
-  function toggleFavorite(id) {
-    const on = favorites.toggle(id);
+  const toastBox = app.querySelector("#toast");
+  function toast(text, ms = 4500) {
+    toastBox.textContent = text;
+    toastBox.hidden = false;
+    clearTimeout(toast.t);
+    toast.t = setTimeout(() => { toastBox.hidden = true; }, ms);
+  }
+
+  // Para guardar hace falta sesión con correo verificado. Devuelve true si se puede seguir.
+  function requireAccount(reason) {
+    if (!account.signedIn) { state.authReason = reason; location.hash = "#/cuenta"; return false; }
+    if (account.suspended) { toast("Tu cuenta está suspendida."); return false; }
+    if (!account.verified) { toast("Verificá tu correo para poder guardar. Te lo explicamos en tu perfil."); return false; }
+    return userdata.active;
+  }
+
+  async function toggleFavorite(id) {
+    if (!requireAccount("Iniciá sesión para guardar favoritos.")) return;
+    const item = catalog.get(id);
+    if (!item) return;
+    let on;
+    try { on = await userdata.favorites.toggle(item); }
+    catch { toast("No se pudo guardar el favorito. Probá de nuevo."); return; }
     if (["favoritos", "inicio"].includes(state.route.name) && !state.query) { render(); return; }
     // En el resto de las pantallas se actualizan los botones en su lugar (sin cortar el video).
     app.querySelectorAll(`[data-action="fav"][data-id="${CSS.escape(id)}"]`).forEach(b => {
@@ -124,8 +168,8 @@ export function startApp(app, extensions = {}) {
 
   async function clearData(what) {
     if (what === "cache" || what === "all") await cacheClear();
-    if (what === "progress" || what === "all") progress.clear();
-    if (what === "favorites" || what === "all") favorites.clear();
+    if (what === "progress" || what === "all") { progress.clear(); await ctx.progress.clear(); }
+    if (what === "favorites" || what === "all") { localFavorites.clear(); await ctx.favorites.clear(); }
     if (what === "all") { settings.reset(); location.hash = "#/inicio"; location.reload(); return; }
     if (what === "cache") await catalog.load({ force: true });
     render();
@@ -173,14 +217,76 @@ export function startApp(app, extensions = {}) {
       state.confirm = null;
       clearData(what);
     },
-    "tmdb-remove": () => { settings.set("tmdbKey", ""); state.tmdbStatus = "Clave quitada."; render(); }
+    "tmdb-remove": () => { settings.set("tmdbKey", ""); state.tmdbStatus = "Clave quitada."; render(); },
+
+    // ---------- cuenta ----------
+    logout: () => run(() => account.logout(), { after: () => { location.hash = "#/inicio"; } }),
+    "logout-all": () => confirmThen("logout-all", () => run(() => account.logoutEverywhere(), { after: () => { state.authReason = "Cerraste todas las sesiones. Volvé a ingresar."; location.hash = "#/cuenta"; } })),
+    "verify-check": () => run(async () => {
+      if (!(await account.refreshVerification())) throw new Error("Todavía no figura verificado. Tocá el enlace del correo y probá de nuevo.");
+    }, { ok: "¡Listo! Tu correo está verificado." }),
+    "verify-resend": () => run(() => account.resendVerification(), { ok: "Te reenviamos el correo de verificación." }),
+    "import-local": () => run(async () => {
+      for (const id of localFavorites.list()) { const item = catalog.get(id); if (item && !userdata.favorites.has(id)) await userdata.favorites.toggle(item); }
+      for (const p of progress.recent(999)) {
+        const item = catalog.get(p.itemId || p.id);
+        if (item) userdata.progress.save(p.id, p.time, p.duration, { ...p, kind: item.kind, poster: item.poster });
+      }
+      userdata.progress.flush();
+      localFavorites.clear();
+      progress.clear();
+    }, { ok: "Pasamos tus favoritos y lo que estabas viendo a tu cuenta." }),
+    "list-delete": el => confirmThen(`list-del:${el.dataset.id}`, () => run(() => userdata.lists.remove(el.dataset.id), { after: () => { location.hash = "#/listas"; } })),
+    "list-remove-item": el => run(async () => {
+      await userdata.lists.removeItem(el.dataset.id, el.dataset.item);
+      state.listItems = { ...state.listItems, [el.dataset.id]: await userdata.lists.items(el.dataset.id) };
+    }),
+    "history-remove": el => run(() => userdata.progress.remove(el.dataset.id)),
+    "history-clear": () => confirmThen("history-clear", () => run(() => userdata.progress.clear(), { ok: "Historial borrado." })),
+
+    // ---------- administración ----------
+    "admin-suspend": el => {
+      const suspend = el.dataset.suspend === "true";
+      confirmThen(`${suspend ? "suspend" : "reactivate"}:${el.dataset.uid}`, () => run(async () => {
+        await admin.setSuspended(el.dataset.uid, suspend, "Desde el panel");
+        state.admin = null; // se vuelve a cargar
+      }));
+    },
+    "admin-delete-list": el => confirmThen(`pub:${el.dataset.id}`, () => run(async () => {
+      await admin.deletePublicList(el.dataset.id, "Moderación");
+      state.admin = null;
+    }))
   };
+
+  // Ejecuta una operación de cuenta mostrando "ocupado", y después el mensaje o el error.
+  async function run(fn, { ok = "", after = null } = {}) {
+    state.busy = true; state.formError = ""; state.formMessage = "";
+    render();
+    try {
+      await fn();
+      state.formMessage = ok;
+      after?.();
+    } catch (err) {
+      state.formError = err?.message || "No se pudo completar la operación.";
+    } finally {
+      state.busy = false;
+      render();
+    }
+  }
+
+  // Acciones irreversibles: el primer toque pide confirmación, el segundo ejecuta.
+  function confirmThen(key, fn) {
+    if (state.confirm !== key) { state.confirm = key; render(); return; }
+    state.confirm = null;
+    fn();
+  }
+  const CONFIRM_ACTIONS = ["provider-remove", "data-clear", "logout-all", "list-delete", "history-clear", "admin-suspend", "admin-delete-list"];
 
   app.addEventListener("click", ev => {
     const el = ev.target.closest("[data-action]");
     const action = el?.dataset.action;
     // Cualquier otro clic cancela una confirmación pendiente ("¿Seguro? Tocá de nuevo").
-    if (state.confirm && !["provider-remove", "data-clear"].includes(action)) { state.confirm = null; if (state.route.name === "ajustes") render(); }
+    if (state.confirm && !CONFIRM_ACTIONS.includes(action)) { state.confirm = null; render(); }
     if (el?.dataset.skip !== undefined && ev.target.closest("[data-skip]")) { ev.preventDefault(); view.focus(); return; }
     if (action && clickActions[action] && el.type !== "checkbox" && el.tagName !== "SELECT" && el.type !== "file") clickActions[action](el, ev);
   });
@@ -232,8 +338,64 @@ export function startApp(app, extensions = {}) {
         state.tmdbStatus = "Clave guardada.";
         render();
       }
+    } else if (form.dataset.form === "login") {
+      run(() => account.login(data.email || "", data.password || ""), { after: () => { state.authReason = ""; location.hash = "#/perfil"; } });
+    } else if (form.dataset.form === "register") {
+      run(() => account.register(data.email || "", data.password || "", data.name || ""), { after: () => { location.hash = "#/perfil"; } });
+    } else if (form.dataset.form === "reset") {
+      let text = "";
+      run(async () => { text = await account.resetPassword(data.email || ""); }, { after: () => { state.formMessage = text; } });
+    } else if (form.dataset.form === "profile-name") {
+      run(() => account.updateName(data.name), { ok: "Nombre actualizado." });
+    } else if (form.dataset.form === "password") {
+      run(() => account.changePassword(data.current || "", data.next || ""), { ok: "Contraseña cambiada. Tus otras sesiones se cerraron.", after: () => form.reset() });
+    } else if (form.dataset.form === "delete-account") {
+      run(() => account.deleteAccount(data.password || "", { publicListIds: userdata.lists.publicIds() }), {
+        after: () => { state.authReason = "Tu cuenta y tus datos se eliminaron."; location.hash = "#/cuenta"; }
+      });
+    } else if (form.dataset.form === "list-create") {
+      if (!requireAccount("Iniciá sesión para crear listas.")) return;
+      run(async () => {
+        if (!(data.name || "").trim()) throw new Error("Escribí un nombre para la lista.");
+        const id = await userdata.lists.create({ name: data.name });
+        location.hash = `#/lista/${encodeURIComponent(id)}`;
+      });
+    } else if (form.dataset.form === "list-edit") {
+      run(() => {
+        if (!(data.name || "").trim()) throw new Error("Escribí un nombre para la lista.");
+        return userdata.lists.update(form.dataset.id, { name: data.name, description: data.description || "", visibility: data.public ? "public" : "private" });
+      }, { ok: "Lista guardada." });
+    } else if (form.dataset.form === "add-to-list") {
+      if (!requireAccount("Iniciá sesión para usar listas.")) return;
+      const item = catalog.get(form.dataset.id);
+      if (!item) return;
+      try {
+        let listId = data.list;
+        if (listId === "__nueva") listId = await userdata.lists.create({ name: item.title.slice(0, 80) });
+        await userdata.lists.addItem(listId, item);
+        toast(`Agregado a "${userdata.lists.get(listId)?.name || "tu lista"}".`);
+      } catch {
+        toast("No se pudo agregar a la lista. Probá de nuevo.");
+      }
     }
   });
+
+  // ---------- cuenta: estado en la barra superior ----------
+  const accountLink = app.querySelector("#account-link");
+  function updateAccountLink() {
+    if (account.signedIn) {
+      accountLink.href = "#/perfil";
+      accountLink.innerHTML = `<span class="avatar" aria-hidden="true">${e(account.name.slice(0, 1).toUpperCase())}</span><span class="account-name">${e(account.name)}</span>`;
+      accountLink.setAttribute("aria-label", `Tu perfil: ${account.name}`);
+    } else {
+      accountLink.href = "#/cuenta";
+      accountLink.textContent = "Ingresar";
+      accountLink.removeAttribute("aria-label");
+    }
+  }
+  account.onChange(() => { updateAccountLink(); queueRender(); });
+  userdata.onChange(queueRender);
+  account.start().catch(() => { toast("No se pudo conectar con el servicio de cuentas. El catálogo funciona igual."); });
 
   // ---------- búsqueda ----------
   let searchTimer = 0;
@@ -295,6 +457,12 @@ export function startApp(app, extensions = {}) {
       state.sourceIndex = 0;
     }
     state.confirm = null;
+    if (state.route.name !== previous.name || state.route.id !== previous.id || state.route.mode !== previous.mode) {
+      state.formError = ""; state.formMessage = "";
+      if (state.route.name !== "cuenta") state.authReason = "";
+      if (state.route.name === "admin") state.admin = null; // datos frescos al entrar
+      state.listItems = {}; // las listas se vuelven a leer al entrar (pueden haber cambiado)
+    }
     if (state.query) { state.query = ""; search.value = ""; }
     render({ focusHeading: state.route.name !== "ver" });
     window.scrollTo({ top: 0 });

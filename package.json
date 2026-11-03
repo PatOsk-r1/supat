@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "test": "node --test \"tests/*.test.js\"",
     "page": "vite build --mode page && node scripts/build-page.mjs",
-    "test:reglas": "firebase emulators:exec --only firestore --project demo-supat \"node --test tests/reglas.emu.js\""
+    "test:reglas": "firebase emulators:exec --only firestore --project demo-supat \"node --test tests/reglas.emu.js\"",
+    "dev:emu": "vite --mode emulador",
+    "emuladores": "firebase emulators:start --only auth,firestore --project demo-supat"
   },
   "dependencies": {
     "firebase": "^12.19.0",

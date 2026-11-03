@@ -20,6 +20,11 @@ export function parseRoute(hash) {
   const [name = "inicio", a, b] = parts;
   if (name === "titulo" && a) return { name: "titulo", id: a };
   if (name === "ver" && a) return { name: "ver", id: a, episodeId: b || null };
+  // Cuenta: #/cuenta (ingresar), #/cuenta/registro, #/cuenta/recuperar
+  if (name === "cuenta") return { name: "cuenta", mode: ["registro", "recuperar"].includes(a) ? a : "ingresar" };
+  if (["perfil", "listas", "historial", "admin"].includes(name)) return { name };
+  if (name === "lista" && a) return { name: "lista", id: a };
+  if (name === "publica" && a) return { name: "publica", id: a };
   return SECTIONS.some(s => s.id === name) ? { name } : { name: "inicio" };
 }
 

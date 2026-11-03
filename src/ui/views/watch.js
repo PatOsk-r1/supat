@@ -96,7 +96,8 @@ function mountWatch(view, ctx, item, route, backHref) {
         episodeId: episode?.id || null,
         episodeLabel: episode ? `T${seasonNumber} · E${episode.number} — ${episode.title}` : "",
         title: item.title,
-        still: episode?.still || ""
+        kind: item.kind,
+        poster: item.poster || ""
       }),
       onEnded: () => { if (next && ctx.settings.get("autoplayNext")) location.hash = nextHref; }
     });

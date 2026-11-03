@@ -25,15 +25,19 @@ service cloud.firestore {
     function isAdmin() { return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)); }
     function profilePath(uid) { return /databases/$(database)/documents/users/$(uid); }
 
-    // Sesión vigente: la cuenta no está suspendida y la sesión empezó después del último
-    // "cerrar todas las sesiones" (revokedAt). Así una sesión cerrada no sirve aunque su
-    // token siga en algún dispositivo.
-    function activeSession(uid) {
+    // Sesión vigente: empezó después del último "cerrar todas las sesiones" (revokedAt), así
+    // una sesión cerrada no sirve aunque su token siga en algún dispositivo. Además vence a
+    // los 30 días de iniciada: hay que volver a entrar.
+    function sessionValid(uid) {
       let p = get(profilePath(uid)).data;
-      return p.suspended != true && request.auth.token.auth_time > p.revokedAt.toMillis() / 1000;
+      return request.auth.token.auth_time > p.revokedAt.toMillis() / 1000
+        && request.auth.token.auth_time > request.time.toMillis() / 1000 - 2592000;
     }
-    function canRead(uid) { return isSelf(uid) && exists(profilePath(uid)) && activeSession(uid); }
-    function canWrite(uid) { return canRead(uid) && verified(); }
+    function notSuspended(uid) { return get(profilePath(uid)).data.suspended != true; }
+    // Leer: el dueño con sesión vigente (aunque esté suspendido, para poder borrar sus datos).
+    function canRead(uid) { return isSelf(uid) && exists(profilePath(uid)) && sessionValid(uid); }
+    // Escribir: además, correo verificado y cuenta no suspendida.
+    function canWrite(uid) { return canRead(uid) && notSuspended(uid) && verified(); }
 
     // ---------- validaciones ----------
     function str(v, min, max) { return v is string && v.size() >= min && v.size() <= max; }

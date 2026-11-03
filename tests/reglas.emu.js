@@ -81,11 +81,20 @@ test("5. una sesión anterior a 'cerrar todas las sesiones' ya no sirve", async 
   await assertSucceeds(getDocs(collection(nueva, "users/ana/favorites")));
 });
 
-test("5b. una cuenta suspendida no puede leer ni modificar sus datos", async () => {
+test("5c. una sesión iniciada hace más de 30 días vence", async () => {
+  const vencida = session("ana", { auth_time: now() - 31 * 86400 });
+  await assertFails(getDocs(collection(vencida, "users/ana/favorites")));
+  await assertSucceeds(getDocs(collection(session("ana", { auth_time: now() - 29 * 86400 }), "users/ana/favorites")));
+});
+
+test("5b. una cuenta suspendida no puede guardar nada (solo leer y borrar lo suyo)", async () => {
   await env.withSecurityRulesDisabled(ctx => updateDoc(doc(ctx.firestore(), "users/beto"), { suspended: true }));
   const db = session("beto");
-  await assertFails(getDocs(collection(db, "users/beto/favorites")));
   await assertFails(setDoc(doc(db, "users/beto/favorites/x"), { ...fav, addedAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(db, "users/beto/favorites/f1"), { title: "cambiado" }));
+  await assertFails(setDoc(doc(db, "users/beto/lists/nueva"), list()));
+  await assertFails(updateDoc(doc(db, "users/beto"), { displayName: "Otro", updatedAt: serverTimestamp() }));
+  await assertSucceeds(getDocs(collection(db, "users/beto/favorites"))); // para poder eliminar la cuenta
   await assertSucceeds(getDoc(doc(db, "users/beto"))); // puede ver que está suspendida
 });
 
