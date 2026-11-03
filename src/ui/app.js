@@ -35,7 +35,6 @@ export function startApp(app, extensions = {}) {
     <nav aria-label="Secciones">${SECTIONS.map(s =>
       `<a class="nav-item" href="#/${s.id}" data-nav="${s.id}"><span class="nav-icon" aria-hidden="true">${s.icon}</span><span class="nav-label">${s.label}</span></a>`).join("")}
     </nav>
-    <p class="sidebar-note">Supat · solo fuentes autorizadas.</p>
   </aside>
   <div class="content">
     <header class="topbar">
@@ -45,7 +44,7 @@ export function startApp(app, extensions = {}) {
     </header>
     ${PREVIEW ? `<p class="preview-banner" role="note">Vista previa publicada: acá solo funciona el contenido de demostración, porque el visor bloquea las conexiones externas. Para películas reales y TV, abrí la app en tu PC (ver README).</p>` : ""}
     <main id="view" tabindex="-1"></main>
-    <footer>SUPAT <span>Prototipo independiente · solo fuentes autorizadas · metadatos de TMDb cuando está configurado</span></footer>
+    <footer>SUPAT <span>Información e imágenes de TMDb</span></footer>
   </div>`;
   const view = app.querySelector("#view");
   const search = app.querySelector("#search");

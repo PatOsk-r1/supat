@@ -77,7 +77,7 @@ export function render(ctx) {
   <div class="settings">
     <section class="settings-block" aria-labelledby="h-prov">
       <h2 id="h-prov">Proveedores de contenido</h2>
-      <p class="note">Cada proveedor es una fuente de títulos. Usá solo fuentes que tengas permiso de usar: la app no trae ninguna fuente privada.</p>
+      <p class="note">Cada proveedor es una fuente de títulos.</p>
       ${instances.map(i => providerCard(i, ctx)).join("") || `<p class="note">No hay proveedores configurados.</p>`}
       ${addable.length ? `<div class="add-provider">
         <label for="add-type">Agregar proveedor</label>
@@ -102,6 +102,7 @@ export function render(ctx) {
         <div class="form-actions"><button type="submit" class="primary">Guardar y probar</button>
           ${s.tmdbKey ? `<button type="button" class="danger" data-action="tmdb-remove" data-key="tmdb-remove">Quitar clave</button>` : ""}</div>
         <p class="note" role="status" id="tmdb-status">${e(tmdbStatus)}</p>
+        <p class="note tmdb-credit">Este producto usa la API de TMDb, pero no está respaldado ni certificado por TMDb.</p>
       </form>
     </section>
 
@@ -124,13 +125,6 @@ export function render(ctx) {
         ${confirmButton(ctx, "favorites", "Borrar favoritos")}
         ${confirmButton(ctx, "all", "Restablecer todo")}
       </div>
-    </section>
-
-    <section class="settings-block" aria-labelledby="h-about">
-      <h2 id="h-about">Acerca de</h2>
-      <p class="note">Supat es una aplicación independiente. No incluye fuentes privadas ni contenido protegido:
-        todo lo que se reproduce viene de los proveedores configurados acá.</p>
-      <p class="note tmdb-credit">Este producto usa la API de TMDb, pero no está respaldado ni certificado por TMDb.</p>
     </section>
   </div>`;
   return { title: "Ajustes", html };

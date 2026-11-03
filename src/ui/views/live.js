@@ -44,7 +44,7 @@ export function render(ctx, section) {
   const all = ctx.catalog.all().filter(x => x.kind === "live")
     .sort((a, b) => (a.channelNumber || 1e9) - (b.channelNumber || 1e9) || a.title.localeCompare(b.title, "es"));
   if (!all.length) {
-    return { title: section.label, html: `<div class="section-heading">${heading("CANALES", section.label)}</div>` + empty("Todavía no hay canales.", "Agregá una lista de canales (M3U) autorizada en Ajustes.", `<a class="primary" href="#/ajustes">Ir a Ajustes</a>`) };
+    return { title: section.label, html: `<div class="section-heading">${heading("CANALES", section.label)}</div>` + empty("Todavía no hay canales.", "Agregá una lista de canales (M3U) en Ajustes.", `<a class="primary" href="#/ajustes">Ir a Ajustes</a>`) };
   }
   const f = ctx.state.filters;
   const categories = ctx.catalog.categories("live");

@@ -17,7 +17,7 @@ async function downloadText(url, what) {
 export default {
   type: "m3u",
   name: "Lista de canales (M3U)",
-  description: "Canales de TV en vivo (y películas o series si la lista las incluye) desde una lista M3U autorizada, con guía de programación XMLTV opcional.",
+  description: "Canales de TV en vivo (y películas o series si la lista las incluye) desde una lista M3U, con guía de programación XMLTV opcional.",
   origin: "La lista que cargues",
   license: "Usá solo listas que tengas permiso de usar",
   kinds: ["live", "movie", "series"],
