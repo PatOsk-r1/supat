@@ -1,0 +1,45 @@
+# API del catálogo central de Supat (Cloudflare Workers + D1, plan gratuito).
+# Ver worker/README.md. Los secretos NO van acá: se cargan con "wrangler secret put".
+name = "supat-api"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+# Cron Triggers (gratis, hasta 5 por cuenta):
+#  - 05:00 UTC todos los días: arranca la sincronización incremental de cada proveedor.
+#  - cada 10 minutos: sigue los trabajos pendientes en tandas chicas (si no hay, no hace nada).
+[triggers]
+crons = ["0 5 * * *", "*/10 * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "supat-catalogo"
+# Se completa después de "wrangler d1 create supat-catalogo" (necesita la cuenta de Cloudflare).
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[vars]
+FIREBASE_PROJECT_ID = "supat-h8tfw"
+# Sitios que pueden usar la API (separados por coma).
+ALLOWED_ORIGINS = "https://supat-h8tfw.web.app,https://supat-h8tfw.firebaseapp.com,https://patosk-r1.github.io"
+# uid de Firebase de los dueños iniciales (separados por coma). No es un secreto: identifica, no autentica.
+OWNER_UIDS = ""
+# Tandas: páginas por ejecución y títulos máximos por página que se procesan.
+SYNC_PAGES_PER_RUN = "3"
+
+# Desarrollo local ("npm run api:dev"): usa .dev.vars (no se sube a Git) y estos valores.
+[env.local]
+name = "supat-api-local"
+[[env.local.d1_databases]]
+binding = "DB"
+database_name = "supat-catalogo"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+[env.local.vars]
+FIREBASE_PROJECT_ID = "demo-supat"
+ALLOWED_ORIGINS = "http://localhost:5174,http://127.0.0.1:5174,http://localhost:5175,http://127.0.0.1:5175"
+OWNER_UIDS = ""
+SYNC_PAGES_PER_RUN = "3"
+# Acepta los tokens del emulador de Firebase Auth. Solo funciona si la API corre en localhost.
+AUTH_EMULATOR = "true"
+FIRESTORE_EMULATOR = "http://127.0.0.1:8080"

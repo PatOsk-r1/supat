@@ -8,3 +8,7 @@ publish/
 !.env.example
 *-debug.log
 .firebase/
+
+# Cloudflare Workers (secretos locales y base local)
+.dev.vars
+.wrangler/

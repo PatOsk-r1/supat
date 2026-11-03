@@ -12,7 +12,12 @@
     "page": "vite build --mode page && node scripts/build-page.mjs",
     "test:reglas": "firebase emulators:exec --only firestore --project demo-supat \"node --test tests/reglas.emu.js\"",
     "dev:emu": "vite --mode emulador",
-    "emuladores": "firebase emulators:start --only auth,firestore --project demo-supat"
+    "emuladores": "firebase emulators:start --only auth,firestore --project demo-supat",
+    "api:dev": "wrangler dev --config worker/wrangler.toml --env local --port 8788 --ip 127.0.0.1",
+    "api:migrar:local": "wrangler d1 migrations apply supat-catalogo --local --config worker/wrangler.toml --env local",
+    "api:migrar": "wrangler d1 migrations apply supat-catalogo --remote --config worker/wrangler.toml",
+    "api:publicar": "wrangler deploy --config worker/wrangler.toml",
+    "api:clave": "node scripts/clave-secretos.mjs"
   },
   "dependencies": {
     "firebase": "^12.19.0",
@@ -20,6 +25,7 @@
     "vite": "^6.1.0"
   },
   "devDependencies": {
-    "@firebase/rules-unit-testing": "^5.0.2"
+    "@firebase/rules-unit-testing": "^5.0.2",
+    "wrangler": "^4.157.0"
   }
 }

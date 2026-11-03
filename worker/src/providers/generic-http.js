@@ -1,0 +1,289 @@
+// Adaptador genérico para APIs HTTP que responden JSON. No está atado a ningún servicio:
+// todo (rutas, paginación, autenticación y qué campo es cada dato) se describe en la
+// "especificación" que carga el propietario. Formato completo en worker/README.md.
+import { ProviderError, pick, readJsonBody, KINDS, playbackType } from "./contract.js";
+
+const SECRET_KEYS = ["apiKey", "token", "username", "password"];
+const PAGINATION = ["none", "page", "offset", "cursor", "link"];
+const MAX_PAGES = 100000;
+
+// Reemplaza {nombre} con valores. Las credenciales solo se aceptan en "auth".
+function render(template, vars) {
+  return String(template).replace(/\{([a-zA-Z0-9_.]+)\}/g, (_, name) => {
+    const v = name.startsWith("data.") ? vars.data?.[name.slice(5)] : vars[name];
+    return v == null ? "" : String(v);
+  });
+}
+const placeholders = t => [...String(t).matchAll(/\{([a-zA-Z0-9_.]+)\}/g)].map(m => m[1]);
+
+function parseSpec(config) {
+  if (config.spec && typeof config.spec === "object") return config.spec;
+  try { return JSON.parse(config.spec || "{}"); }
+  catch { throw new ProviderError("La especificación no es JSON válido."); }
+}
+
+function endpointProblems(ep, where) {
+  const p = [];
+  if (!ep || typeof ep !== "object") return [`${where}: falta la definición.`];
+  if (typeof ep.path !== "string" || !ep.path.startsWith("/")) p.push(`${where}: "path" debe empezar con "/" (es relativo a la dirección base).`);
+  if (ep.method && !["GET", "POST"].includes(ep.method)) p.push(`${where}: "method" solo puede ser GET o POST.`);
+  const templates = [ep.path, ...Object.values(ep.query || {}), ...Object.values(ep.body || {})];
+  for (const name of templates.flatMap(placeholders)) {
+    if (SECRET_KEYS.includes(name)) p.push(`${where}: las credenciales ({${name}}) solo pueden ir en "auth".`);
+  }
+  if (ep.pagination && !PAGINATION.includes(ep.pagination.type)) p.push(`${where}: paginación desconocida (usar ${PAGINATION.join(", ")}).`);
+  if (ep.pagination?.type === "cursor" && !ep.pagination.next) p.push(`${where}: la paginación por cursor necesita "next".`);
+  if (ep.pagination?.type === "link" && !ep.pagination.next) p.push(`${where}: la paginación por enlace necesita "next".`);
+  return p;
+}
+
+export function specProblems(spec) {
+  const p = [];
+  if (!spec || typeof spec !== "object" || Array.isArray(spec)) return ["La especificación debe ser un objeto JSON."];
+  const catalog = spec.catalog || {};
+  const kinds = Object.keys(catalog);
+  if (!kinds.length) p.push('Falta "catalog" con al menos un tipo (movie, series, anime o live).');
+  for (const k of kinds) {
+    if (!KINDS.includes(k)) p.push(`Tipo desconocido en "catalog": ${k}.`);
+    p.push(...endpointProblems(catalog[k], `catalog.${k}`));
+    if (!catalog[k]?.map?.id || !catalog[k]?.map?.title) p.push(`catalog.${k}: "map" necesita al menos "id" y "title".`);
+  }
+  if (spec.seasons) p.push(...endpointProblems(spec.seasons, "seasons"));
+  if (spec.episodes) {
+    p.push(...endpointProblems(spec.episodes, "episodes"));
+    if (!spec.episodes.map?.id || !spec.episodes.map?.number) p.push('episodes: "map" necesita al menos "id" y "number".');
+  }
+  for (const key of ["resolve", "resolveEpisode", "test"]) if (spec[key]) p.push(...endpointProblems(spec[key], key));
+  for (const key of ["resolve", "resolveEpisode"]) if (spec[key] && !spec[key].url) p.push(`${key}: falta "url" (ruta al campo con la dirección).`);
+  for (const a of [].concat(spec.auth || [])) {
+    if (!["header", "query", "basic"].includes(a?.in)) p.push('Cada entrada de "auth" necesita "in": header, query o basic.');
+    if (a?.in !== "basic" && (!a?.name || typeof a.value !== "string")) p.push('Las entradas "header" y "query" de "auth" necesitan "name" y "value".');
+  }
+  for (const origin of [].concat(spec.embedOrigins || [])) {
+    try { const u = new URL(origin); if (u.protocol !== "https:" || u.origin !== origin) throw new Error(); }
+    catch { p.push(`Origen de reproductor externo inválido: ${origin} (usar "https://dominio").`); }
+  }
+  return p;
+}
+
+function base(config) {
+  let u;
+  try { u = new URL(String(config.baseUrl || "").trim()); } catch { throw new ProviderError("La dirección base no es válida."); }
+  return u;
+}
+
+// Arma la consulta: dirección, encabezados y cuerpo, con la autenticación de la especificación.
+// `link`: ruta + consulta de la página siguiente que dio el propio proveedor (paginación "link").
+function buildRequest(ctx, spec, ep, vars, link = "") {
+  const root = base(ctx.config);
+  const prefix = root.pathname.replace(/\/$/, "");
+  const url = new URL(link ? root.origin + link : root.origin + prefix + render(ep.path, vars));
+  if (url.origin !== root.origin) throw new ProviderError("La ruta apunta fuera de la dirección base.");
+  if (!link) for (const [k, t] of Object.entries(ep.query || {})) {
+    const value = render(t, vars);
+    if (value !== "" || !placeholders(t).length) url.searchParams.set(k, value);
+  }
+  const headers = { Accept: "application/json", ...(spec.headers || {}) };
+  for (const a of [].concat(spec.auth || [])) {
+    if (a.in === "basic") headers.Authorization = `Basic ${btoa(`${ctx.secrets.username || ""}:${ctx.secrets.password || ""}`)}`;
+    else {
+      const value = render(a.value, ctx.secrets);
+      if (a.in === "header") headers[a.name] = value;
+      else url.searchParams.set(a.name, value);
+    }
+  }
+  const init = { method: ep.method || "GET", headers };
+  if (init.method === "POST" && ep.body) {
+    init.body = JSON.stringify(Object.fromEntries(Object.entries(ep.body).map(([k, t]) => [k, render(t, vars)])));
+    headers["Content-Type"] = "application/json";
+  }
+  return { url, init };
+}
+
+async function call(ctx, spec, ep, vars, link = "") {
+  const { url, init } = buildRequest(ctx, spec, ep, vars, link);
+  return readJsonBody(await ctx.fetch(url.toString(), init));
+}
+
+function sinceValue(since, format) {
+  if (!since) return "";
+  if (format === "unix") return String(Math.floor(since / 1000));
+  if (format === "unixms") return String(since);
+  if (format === "date") return new Date(since).toISOString().slice(0, 10);
+  return new Date(since).toISOString();
+}
+
+// Variables de paginación para la consulta y cursor siguiente según la respuesta.
+function pageVars(ep, cursor) {
+  const pg = ep.pagination || { type: "none" };
+  const limit = Number(pg.limit) || 50;
+  if (pg.type === "page") return { page: cursor?.page ?? (Number(pg.start) || 1), limit };
+  if (pg.type === "offset") return { offset: cursor?.offset ?? 0, limit };
+  if (pg.type === "cursor") return { cursor: cursor?.cursor ?? "", limit };
+  return { limit };
+}
+
+function nextCursor(ep, cursor, data, count, root) {
+  const pg = ep.pagination || { type: "none" };
+  if (pg.type === "none" || !count) return null;
+  if ((cursor?.n || 0) + 1 >= MAX_PAGES) return null;
+  const n = (cursor?.n || 0) + 1;
+  if (pg.type === "page") {
+    const page = cursor?.page ?? (Number(pg.start) || 1);
+    const total = Number(pick(data, pg.totalPages));
+    if (total && page >= total) return null;
+    return { page: page + 1, n };
+  }
+  if (pg.type === "offset") {
+    const limit = Number(pg.limit) || 50;
+    const offset = (cursor?.offset ?? 0) + count;
+    const total = Number(pick(data, pg.total));
+    if ((total && offset >= total) || count < limit) return null;
+    return { offset, n };
+  }
+  const next = pick(data, pg.next);
+  if (!next) return null;
+  if (pg.type === "cursor") return { cursor: String(next).slice(0, 500), n };
+  // "link": dirección de la página siguiente; tiene que ser del mismo servidor.
+  let u;
+  try { u = new URL(String(next), root); } catch { return null; }
+  if (u.origin !== root.origin) throw new ProviderError("La página siguiente apunta a otro servidor; se detuvo la importación.");
+  return { link: u.pathname + u.search, n };
+}
+
+function mapFields(row, map, prefixes = {}) {
+  const out = { data: {}, playback: {} };
+  for (const [key, path] of Object.entries(map || {})) {
+    let value = key.startsWith("=") ? path : pick(row, path);
+    const name = key.replace(/^=/, "");
+    if (value !== undefined && prefixes[name] && typeof value === "string" && !/^https?:/i.test(value)) value = prefixes[name] + value;
+    if (name.startsWith("data.")) out.data[name.slice(5)] = value;
+    else if (name.startsWith("playback.")) out.playback[name.slice(9)] = value;
+    else out[name] = value;
+  }
+  return out;
+}
+
+const rowsOf = (data, path) => {
+  const rows = path ? pick(data, path) : data;
+  if (!Array.isArray(rows)) throw new ProviderError(`La respuesta no tiene una lista en "${path || "(raíz)"}".`);
+  return rows;
+};
+
+export default {
+  id: "http-json",
+  name: "API HTTP genérica (JSON)",
+  description: "Cualquier API que responda JSON. Se describe con una especificación: rutas, paginación, autenticación y qué campo es cada dato.",
+  kindsFor(config) {
+    try { return Object.keys(parseSpec(config).catalog || {}).filter(k => KINDS.includes(k)); } catch { return []; }
+  },
+  kinds: KINDS,
+  fields: [
+    { key: "baseUrl", label: "Dirección base de la API", type: "url", required: true, help: "Por ejemplo https://api.proveedor.com/v1" },
+    { key: "spec", label: "Especificación (JSON)", type: "json", required: true, help: "Rutas, paginación, autenticación y correspondencia de campos. Ver worker/README.md." },
+    { key: "apiKey", label: "Clave de API", type: "password", secret: true, help: "Se usa donde la especificación diga {apiKey}." },
+    { key: "token", label: "Token", type: "password", secret: true, help: "Se usa donde la especificación diga {token}." },
+    { key: "username", label: "Usuario", type: "password", secret: true, help: "Para autenticación básica o {username}." },
+    { key: "password", label: "Contraseña", type: "password", secret: true, help: "Para autenticación básica o {password}." }
+  ],
+  validate(config) {
+    const p = [];
+    try {
+      const u = new URL(String(config.baseUrl || ""));
+      const local = ["localhost", "127.0.0.1"].includes(u.hostname);
+      if (u.protocol !== "https:" && !(local && u.protocol === "http:")) p.push("La dirección base tiene que ser https.");
+      if (u.username || u.password || u.search) p.push("La dirección base no puede llevar usuario, contraseña ni parámetros: usá \"auth\" en la especificación.");
+    } catch { p.push("La dirección base no es válida."); }
+    let spec;
+    try { spec = parseSpec(config); } catch (err) { return [...p, err.message]; }
+    return [...p, ...specProblems(spec)];
+  },
+  supportsIncremental(config) {
+    try {
+      return Object.values(parseSpec(config).catalog || {}).some(ep => [ep.path, ...Object.values(ep.query || {})].some(t => placeholders(t).includes("since")));
+    } catch { return false; }
+  },
+  embedOrigins(config) {
+    try { return [].concat(parseSpec(config).embedOrigins || []); } catch { return []; }
+  },
+
+  async test(ctx) {
+    const spec = parseSpec(ctx.config);
+    if (spec.test) {
+      await call(ctx, spec, spec.test, {});
+      return { message: "Conexión correcta." };
+    }
+    const [kind] = Object.keys(spec.catalog);
+    const page = await this.listPage(ctx, { kind, cursor: null, since: null });
+    return { message: `Conexión correcta: ${page.items.length} título(s) en la primera página de "${kind}".`, sample: page.items.slice(0, 3).map(i => i.title) };
+  },
+
+  async listPage(ctx, { kind, cursor, since }) {
+    const spec = parseSpec(ctx.config);
+    const ep = spec.catalog?.[kind];
+    if (!ep) return { items: [], next: null };
+    const vars = { ...pageVars(ep, cursor), since: sinceValue(since, ep.sinceFormat) };
+    const root = base(ctx.config);
+    const data = await call(ctx, spec, ep, vars, cursor?.link || "");
+    const rows = rowsOf(data, ep.items);
+    const lazy = Boolean(kind === "movie" || kind === "live" || kind === "anime" ? spec.resolve : false);
+    const items = rows.map(row => {
+      const m = mapFields(row, ep.map, ep.prefix);
+      const playback = m.playback.url ? { url: m.playback.url, type: m.playback.type ?? ep.playbackType ?? "" } : lazy ? { lazy: true } : null;
+      const hasEpisodes = kind === "series" || (kind === "anime" && Boolean(spec.episodes) && (m.hasEpisodes ?? !playback));
+      return { ...m, kind, playback, hasEpisodes, data: { ...m.data, id: m.data.id ?? m.id } };
+    });
+    const next = nextCursor(ep, cursor, data, rows.length, root);
+    // El enlace siguiente se guarda en la base: se le quitan los parámetros de autenticación
+    // (se vuelven a agregar al pedirlo).
+    if (next?.link) {
+      const u = new URL(root.origin + next.link);
+      for (const a of [].concat(spec.auth || [])) if (a.in === "query") u.searchParams.delete(a.name);
+      next.link = u.pathname + u.search;
+    }
+    return { items, next };
+  },
+
+  // Episodios de una serie. Si la especificación tiene "seasons", primero pide las temporadas
+  // y después los episodios de cada una ({season} en la ruta).
+  async listEpisodes(ctx, { source, cursor }) {
+    const spec = parseSpec(ctx.config);
+    if (!spec.episodes) return { episodes: [], next: null };
+    const vars0 = { id: source.externalId, data: source.data || {} };
+    let state = cursor || {};
+    if (spec.seasons && !state.seasons) {
+      const rows = rowsOf(await call(ctx, spec, spec.seasons, vars0), spec.seasons.items);
+      const seasons = rows.map(r => Number(pick(r, spec.seasons.map?.number || "season_number"))).filter(n => n >= 0).slice(0, 200);
+      if (!seasons.length) return { episodes: [], next: null };
+      state = { seasons, si: 0 };
+    }
+    const season = state.seasons ? state.seasons[state.si] : undefined;
+    const ep = spec.episodes;
+    const vars = { ...vars0, ...pageVars(ep, state.page), season: season ?? "" };
+    const data = await call(ctx, spec, ep, vars);
+    const rows = rowsOf(data, ep.items);
+    const episodes = rows.map(row => {
+      const m = mapFields(row, ep.map, ep.prefix);
+      const playback = m.playback.url ? { url: m.playback.url, type: m.playback.type ?? ep.playbackType ?? "" } : spec.resolveEpisode ? { lazy: true } : null;
+      return { ...m, season: m.season ?? season ?? ep.defaultSeason ?? 1, playback, data: { ...m.data, id: m.data.id ?? m.id } };
+    });
+    const nextPage = nextCursor(ep, state.page, data, rows.length, base(ctx.config));
+    let next = null;
+    if (nextPage) next = { ...state, page: nextPage };
+    else if (state.seasons && state.si + 1 < state.seasons.length) next = { seasons: state.seasons, si: state.si + 1 };
+    return { episodes, next };
+  },
+
+  async resolve(ctx, { source, episode }) {
+    const spec = parseSpec(ctx.config);
+    const ep = episode ? spec.resolveEpisode : spec.resolve;
+    if (!ep) throw new ProviderError("Este proveedor no indica cómo obtener la fuente de reproducción.");
+    const target = episode || source;
+    const vars = { id: target.externalId, data: target.data || {}, seriesId: source?.externalId ?? "", season: episode?.season ?? "", number: episode?.number ?? "" };
+    if (episode) vars.data = { ...(source?.data || {}), ...(episode.data || {}) };
+    const data = await call(ctx, spec, ep, vars);
+    const url = pick(data, ep.url);
+    if (!url) throw new ProviderError("El proveedor no devolvió una dirección de reproducción.");
+    return { url: String(url), type: playbackType(ep.type ? pick(data, ep.type) ?? ep.typeValue : ep.typeValue ?? "") };
+  }
+};
