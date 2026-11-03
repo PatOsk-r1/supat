@@ -16,7 +16,7 @@
     "api:dev": "wrangler dev --config worker/wrangler.toml --env local --port 8788 --ip 127.0.0.1 --test-scheduled",
     "api:migrar:local": "wrangler d1 migrations apply supat-catalogo --local --config worker/wrangler.toml --env local",
     "api:migrar": "wrangler d1 migrations apply supat-catalogo --remote --config worker/wrangler.toml",
-    "api:publicar": "wrangler deploy --config worker/wrangler.toml",
+    "api:publicar": "wrangler deploy --config worker/wrangler.toml --env=\"\"",
     "api:clave": "node scripts/clave-secretos.mjs"
   },
   "dependencies": {

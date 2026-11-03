@@ -14,8 +14,7 @@ crons = ["0 5 * * *", "*/10 * * * *"]
 [[d1_databases]]
 binding = "DB"
 database_name = "supat-catalogo"
-# Se completa después de "wrangler d1 create supat-catalogo" (necesita la cuenta de Cloudflare).
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "eb1a68ac-b82e-4840-b632-57bc718974aa"
 migrations_dir = "migrations"
 
 [vars]
