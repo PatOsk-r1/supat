@@ -1,0 +1,174 @@
+rules_version = '2';
+
+// Reglas de seguridad de Firestore. Las aplica el servidor de Google en CADA lectura y
+// escritura: no dependen de lo que haga la interfaz. Ver SEGURIDAD.md.
+//
+// Estructura:
+//   users/{uid}                          perfil privado (sin correo: el correo vive en Firebase Auth)
+//   users/{uid}/favorites/{clave}        favoritos
+//   users/{uid}/history/{clave}          historial y "seguir viendo"
+//   users/{uid}/lists/{listId}           listas (privadas o públicas)
+//   users/{uid}/lists/{listId}/items/{clave}
+//   publicLists/{listId}                 copia pública de las listas que el dueño decide publicar
+//   admins/{uid}                         administradores (solo se crean desde la consola de Firebase)
+//   audit/{id}                           registro de acciones administrativas (no se edita ni borra)
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- identidad ----------
+    // La identidad sale SIEMPRE de request.auth (la sesión verificada por Google),
+    // nunca de un dato que mande el navegador.
+    function signedIn() { return request.auth != null; }
+    function isSelf(uid) { return signedIn() && request.auth.uid == uid; }
+    function verified() { return signedIn() && request.auth.token.email_verified == true; }
+    function isAdmin() { return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)); }
+    function profilePath(uid) { return /databases/$(database)/documents/users/$(uid); }
+
+    // Sesión vigente: la cuenta no está suspendida y la sesión empezó después del último
+    // "cerrar todas las sesiones" (revokedAt). Así una sesión cerrada no sirve aunque su
+    // token siga en algún dispositivo.
+    function activeSession(uid) {
+      let p = get(profilePath(uid)).data;
+      return p.suspended != true && request.auth.token.auth_time > p.revokedAt.toMillis() / 1000;
+    }
+    function canRead(uid) { return isSelf(uid) && exists(profilePath(uid)) && activeSession(uid); }
+    function canWrite(uid) { return canRead(uid) && verified(); }
+
+    // ---------- validaciones ----------
+    function str(v, min, max) { return v is string && v.size() >= min && v.size() <= max; }
+    function num(v, min, max) { return (v is int || v is float) && v >= min && v <= max; }
+    function validKind(k) { return k in ['live', 'movie', 'series', 'anime']; }
+    function validItemRef(d) {
+      return str(d.itemId, 1, 300) && validKind(d.kind) && str(d.title, 1, 200) && str(d.poster, 0, 600);
+    }
+    function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+
+    // ---------- perfil ----------
+    match /users/{uid} {
+      allow read: if isSelf(uid) || isAdmin();
+
+      allow create: if isSelf(uid)
+        && request.resource.data.keys().hasOnly(['displayName', 'createdAt', 'updatedAt', 'suspended', 'revokedAt'])
+        && str(request.resource.data.displayName, 1, 40)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.suspended == false
+        && request.resource.data.revokedAt == timestamp.value(0);
+
+      // El dueño solo cambia su nombre o cierra todas sus sesiones. Nunca "suspended".
+      allow update: if canWrite(uid)
+        && changed().hasOnly(['displayName', 'updatedAt', 'revokedAt'])
+        && str(request.resource.data.displayName, 1, 40)
+        && request.resource.data.updatedAt == request.time
+        && (!('revokedAt' in changed()) || request.resource.data.revokedAt == request.time);
+
+      // El administrador solo suspende o reactiva, y en la misma operación tiene que
+      // quedar el registro de auditoría correspondiente.
+      allow update: if isAdmin() && !isSelf(uid)
+        && changed().hasOnly(['suspended', 'updatedAt', 'lastAudit'])
+        && request.resource.data.suspended is bool
+        && request.resource.data.updatedAt == request.time
+        && existsAfter(/databases/$(database)/documents/audit/$(request.resource.data.lastAudit))
+        && getAfter(/databases/$(database)/documents/audit/$(request.resource.data.lastAudit)).data.target == uid
+        && getAfter(/databases/$(database)/documents/audit/$(request.resource.data.lastAudit)).data.action
+             == (request.resource.data.suspended ? 'suspend' : 'reactivate');
+
+      // Eliminar la cuenta: el dueño puede borrar su perfil aunque esté suspendido.
+      allow delete: if isSelf(uid);
+
+      match /favorites/{key} {
+        allow read: if canRead(uid);
+        allow create, update: if canWrite(uid)
+          && request.resource.data.keys().hasOnly(['itemId', 'kind', 'title', 'poster', 'addedAt'])
+          && validItemRef(request.resource.data)
+          && request.resource.data.addedAt == request.time;
+        allow delete: if isSelf(uid);
+      }
+
+      match /history/{key} {
+        allow read: if canRead(uid);
+        allow create, update: if canWrite(uid)
+          && request.resource.data.keys().hasOnly(['itemId', 'kind', 'title', 'poster', 'episodeId', 'episodeLabel', 'time', 'duration', 'finished', 'updatedAt'])
+          && validItemRef(request.resource.data)
+          && str(request.resource.data.episodeId, 0, 300)
+          && str(request.resource.data.episodeLabel, 0, 200)
+          && num(request.resource.data.time, 0, 1000000)
+          && num(request.resource.data.duration, 0, 1000000)
+          && request.resource.data.finished is bool
+          && request.resource.data.updatedAt == request.time;
+        allow delete: if isSelf(uid);
+      }
+
+      match /lists/{listId} {
+        function validList(d) {
+          return d.keys().hasOnly(['name', 'description', 'visibility', 'createdAt', 'updatedAt'])
+            && str(d.name, 1, 80) && str(d.description, 0, 300)
+            && d.visibility in ['private', 'public']
+            && d.updatedAt == request.time;
+        }
+        allow read: if canRead(uid);
+        allow create: if canWrite(uid) && validList(request.resource.data) && request.resource.data.createdAt == request.time;
+        allow update: if canWrite(uid) && validList(request.resource.data) && request.resource.data.createdAt == resource.data.createdAt;
+        allow delete: if isSelf(uid);
+
+        match /items/{key} {
+          allow read: if canRead(uid);
+          allow create, update: if canWrite(uid)
+            && exists(/databases/$(database)/documents/users/$(uid)/lists/$(listId))
+            && request.resource.data.keys().hasOnly(['itemId', 'kind', 'title', 'poster', 'addedAt'])
+            && validItemRef(request.resource.data)
+            && request.resource.data.addedAt == request.time;
+          allow delete: if isSelf(uid);
+        }
+      }
+    }
+
+    // ---------- listas públicas ----------
+    // Cualquiera puede leerlas, pero no tienen correo ni identificador de usuario: el dueño
+    // se identifica con una huella (hash) de su uid. Solo se publican listas propias que el
+    // dueño marcó como públicas.
+    match /publicLists/{listId} {
+      function ownerKey() { return hashing.sha256(request.auth.uid).toHexString(); }
+      function ownListIsPublic() {
+        return get(/databases/$(database)/documents/users/$(request.auth.uid)/lists/$(listId)).data.visibility == 'public';
+      }
+      function validPublic(d) {
+        return d.keys().hasOnly(['name', 'description', 'ownerName', 'ownerKey', 'items', 'updatedAt'])
+          && str(d.name, 1, 80) && str(d.description, 0, 300) && str(d.ownerName, 1, 40)
+          && d.ownerKey == ownerKey()
+          && d.items is list && d.items.size() <= 200
+          && d.updatedAt == request.time;
+      }
+      allow read: if true;
+      allow create: if canWrite(request.auth.uid) && ownListIsPublic() && validPublic(request.resource.data);
+      allow update: if canWrite(request.auth.uid) && resource.data.ownerKey == ownerKey() && ownListIsPublic() && validPublic(request.resource.data);
+      allow delete: if (signedIn() && resource.data.ownerKey == ownerKey()) || isAdmin();
+    }
+
+    // ---------- administración ----------
+    // Los administradores se crean SOLO desde la consola de Firebase: ninguna regla permite
+    // escribir en admins/, así que nadie puede volverse administrador desde el navegador.
+    match /admins/{uid} {
+      allow read: if isSelf(uid);
+      allow write: if false;
+    }
+
+    match /audit/{id} {
+      allow read: if isAdmin();
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly(['actor', 'action', 'target', 'at', 'detail'])
+        && request.resource.data.actor == request.auth.uid
+        && request.resource.data.action in ['suspend', 'reactivate', 'delete-public-list', 'provider-config']
+        && str(request.resource.data.target, 1, 300)
+        && str(request.resource.data.detail, 0, 300)
+        && request.resource.data.at == request.time;
+      allow update, delete: if false;
+    }
+
+    // Todo lo demás está cerrado.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

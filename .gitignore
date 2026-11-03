@@ -3,3 +3,8 @@ dist/
 analysis/
 *.apk
 publish/
+.env
+.env.*
+!.env.example
+*-debug.log
+.firebase/
