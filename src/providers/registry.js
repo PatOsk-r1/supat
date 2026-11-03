@@ -12,8 +12,12 @@ import jellyfin from "./jellyfin.js";
 // Para sumar un tipo nuevo: crear su archivo en esta carpeta e importarlo acá.
 export const PROVIDER_TYPES = Object.fromEntries([demo, archive, m3u, jellyfin].map(def => [def.type, def]));
 
+// En la vista previa publicada (npm run page) el visor bloquea las conexiones externas,
+// así que ahí solo se activa la demostración.
+export const PREVIEW = import.meta.env?.MODE === "page";
+
 const DEFAULT_INSTANCES = [
-  { id: "archive", type: "archive", enabled: true },
+  { id: "archive", type: "archive", enabled: !PREVIEW },
   { id: "demo", type: "demo", enabled: true }
 ];
 

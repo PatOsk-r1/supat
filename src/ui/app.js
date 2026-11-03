@@ -8,7 +8,7 @@ import { createFavorites } from "../app/favorites.js";
 import { cacheClear, cacheSet } from "../app/cache.js";
 import { catalog } from "../catalog/store.js";
 import * as enrich from "../catalog/enrich.js";
-import { addInstance, updateInstance, removeInstance, getInstance, validateConfig } from "../providers/registry.js";
+import { addInstance, updateInstance, removeInstance, getInstance, validateConfig, PREVIEW } from "../providers/registry.js";
 import * as home from "./views/home.js";
 import * as browse from "./views/browse.js";
 import * as live from "./views/live.js";
@@ -43,6 +43,7 @@ export function startApp(app, extensions = {}) {
       <label class="search"><span aria-hidden="true">⌕</span><span class="sr-only">Buscar por nombre</span>
         <input id="search" type="search" placeholder="Buscar películas, series y canales…" autocomplete="off" aria-keyshortcuts="/"></label>
     </header>
+    ${PREVIEW ? `<p class="preview-banner" role="note">Vista previa publicada: acá solo funciona el contenido de demostración, porque el visor bloquea las conexiones externas. Para películas reales y TV, abrí la app en tu PC (ver README).</p>` : ""}
     <main id="view" tabindex="-1"></main>
     <footer>XUPER WEB <span>Prototipo independiente · solo fuentes autorizadas · metadatos de TMDb cuando está configurado</span></footer>
   </div>`;

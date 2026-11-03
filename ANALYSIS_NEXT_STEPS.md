@@ -2,12 +2,12 @@
 
 Actualizado: 2026-11-02
 
-## Web — confirmado (probado, ver PRUEBAS.md)
+## Web — estado (versión 0.2.0, 2026-11-03)
 
-- Compila con `npm run build` en Windows y pasan las 8 pruebas automáticas (`npm test`).
-- Funcionan las secciones, la búsqueda, los filtros, los favoritos guardados en el navegador, la vista de reproducción con mensajes de estado, la navegación con teclado y el diseño de 320 a 1440 px.
-- Todo el contenido es de demostración (`src/catalog/demo-data.js`), está marcado como tal y no tiene video.
-- No hay conexión con ningún servicio de Xuper TV ni con terceros.
+- Arquitectura en tres partes: catálogo (`src/catalog`), proveedores (`src/providers`) y reproductor (`src/player`). Ver README.
+- Proveedores reales: Internet Archive (probado con reproducción real), listas M3U con guía XMLTV (probado con señales de prueba de Apple) y Jellyfin (sin probar con un servidor real).
+- TMDb para metadatos (probado con respuestas simuladas y el rechazo de una clave inválida; falta una clave válida).
+- 34 pruebas automáticas, sin depender de internet. Detalle en PRUEBAS.md.
 
 ## APK — confirmado
 
@@ -30,12 +30,10 @@ Solo lo que figura en `APK_ANALYSIS_REPORT.md` (inspección previa, hecha fuera 
 
 ## Web — próximos pasos
 
-1. **Etapa 5: evaluar fuentes legítimas.**
-   - Un proveedor "archivo propio": un JSON con tus propios títulos y videos.
-   - Contenido de dominio público o con licencia abierta, por ejemplo Internet Archive o videos de prueba de Blender con licencia Creative Commons. Hay que verificar la licencia de cada uno.
-   - Listas M3U propias o de canales que autoricen su retransmisión. No se van a cargar listas de origen dudoso.
-2. Soporte HLS para navegadores que no lo traen (hls.js, gratuito, licencia Apache-2.0). Solo cuando haya una fuente HLS autorizada.
-3. Probar en Firefox y en un celular real.
+1. Probar con una clave real de TMDb y, si el usuario lo instala, con un servidor Jellyfin.
+2. Probar en Chrome/Edge (pantalla completa), Firefox y un celular real.
+3. Si alguna lista M3U autorizada no se puede leer por CORS: evaluar un pequeño servidor local opcional (gratuito, en la misma PC) solo para fuentes que el usuario tenga permiso de usar.
+4. Instalable como app (PWA) para abrirla desde el escritorio o el celular.
 
 ## Investigación: ¿se pueden reutilizar las fuentes de Xuper TV de forma autorizada? (2026-11-02)
 
