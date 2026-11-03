@@ -98,6 +98,7 @@ test("suspensión y 'cerrar todas las sesiones' del módulo de cuentas se respet
   const env = makeEnv({ FIRESTORE_CHECK: "on" });
   let profile = { fields: { suspended: { booleanValue: false }, revokedAt: { timestampValue: "1970-01-01T00:00:00Z" } } };
   const fetchImpl = async url => {
+    if (String(url).endsWith("/documents/admins/ana")) return new Response("{}", { status: 404 });
     assert.match(String(url), /firestore\.googleapis\.com\/v1\/projects\/proyecto-prueba\/databases\/\(default\)\/documents\/users\/ana$/);
     return new Response(JSON.stringify(profile), { status: 200 });
   };
@@ -124,4 +125,26 @@ test("CORS: solo los sitios permitidos; los cambios desde otro origen se rechaza
   assert.equal(bad.status, 403);
   const r = await api(env, "PATCH", "/api/admin/users/ana", { uid: "dueno", origin: "https://malo.ejemplo", body: { role: "owner" } });
   assert.equal(r.status, 403);
+});
+
+test("los administradores de Firebase (admins/{uid}) son propietarios fijos", async () => {
+  const env = makeEnv({ FIRESTORE_CHECK: "on", OWNER_UIDS: "" });
+  const admins = new Set(["jefa"]);
+  const fetchImpl = async url => {
+    const m = /\/documents\/(users|admins)\/([^/]+)$/.exec(String(url));
+    if (m[1] === "admins") return new Response("{}", { status: admins.has(m[2]) ? 200 : 404 });
+    return new Response("{}", { status: 404 });
+  };
+  const me = async uid => (await handle(new Request("https://api.ejemplo/api/me", { headers: { Authorization: `Bearer ${await token(uid)}` } }), env, { fetchImpl })).json();
+  assert.equal((await me("jefa")).role, "owner");
+  assert.equal((await me("ana")).role, "user");
+  const r = await api(env, "PATCH", "/api/admin/users/jefa", { uid: "jefa", body: { role: "user" } });
+  assert.equal(r.status, 403); // ni a sí misma
+  env.DB.sqlite.exec("UPDATE users SET role = 'owner' WHERE uid = 'ana'"); // otra propietaria (promovida desde el panel)
+  const r2 = await api(env, "PATCH", "/api/admin/users/jefa", { uid: "ana", body: { role: "user" } });
+  assert.equal(r2.status, 403);
+  // Si la quitan de admins/ en la consola, deja de ser propietaria en la próxima revisión.
+  admins.delete("jefa");
+  env.DB.sqlite.exec("UPDATE users SET checked_at = 0");
+  assert.equal((await me("jefa")).role, "user");
 });

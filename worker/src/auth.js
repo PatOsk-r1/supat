@@ -74,21 +74,30 @@ export async function verifyFirebaseToken(token, env, request, fetchImpl = fetch
   return payload;
 }
 
+// Propietario fijo: por OWNER_UIDS o por estar en admins/ de Firebase. No se quita desde el panel.
+export const isFixedOwner = (env, row) => isInitialOwner(env, row.uid) || Boolean(row.fs_admin);
+
 const ownerSet = env => new Set(String(env.OWNER_UIDS || "").split(",").map(s => s.trim()).filter(Boolean));
 export const isInitialOwner = (env, uid) => ownerSet(env).has(uid);
 
-// Lee el perfil de Firestore del propio usuario (suspensión y "cerrar todas las sesiones").
+// Lee de Firestore, con el token del propio usuario (las reglas solo le dejan ver lo suyo):
+//  - users/{uid}: suspensión y "cerrar todas las sesiones";
+//  - admins/{uid}: si es administrador. Esa colección solo se edita desde la consola de Firebase
+//    (firestore.rules: write if false), así que nadie puede agregarse desde la app.
 async function readProfile(env, uid, token, fetchImpl) {
   if (env.FIRESTORE_CHECK === "off") return null;
   const base = env.AUTH_EMULATOR === "true" && env.FIRESTORE_EMULATOR ? env.FIRESTORE_EMULATOR : "https://firestore.googleapis.com";
-  const url = `${base}/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents/users/${encodeURIComponent(uid)}`;
-  const res = await fetchImpl(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (res.status === 404) return { suspended: false, revokedAt: 0 };
-  if (!res.ok) throw new Error(`Firestore respondió ${res.status}`);
-  const doc = await res.json();
-  const f = doc.fields || {};
+  const docs = `${base}/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents`;
+  const headers = { Authorization: `Bearer ${token}` };
+  const [res, adminRes] = await Promise.all([
+    fetchImpl(`${docs}/users/${encodeURIComponent(uid)}`, { headers }),
+    fetchImpl(`${docs}/admins/${encodeURIComponent(uid)}`, { headers })
+  ]);
+  if (res.status !== 404 && !res.ok) throw new Error(`Firestore respondió ${res.status}`);
+  if (adminRes.status !== 404 && !adminRes.ok) throw new Error(`Firestore respondió ${adminRes.status}`);
+  const f = res.status === 404 ? {} : (await res.json()).fields || {};
   const revoked = f.revokedAt?.timestampValue ? Math.floor(Date.parse(f.revokedAt.timestampValue) / 1000) : 0;
-  return { suspended: f.suspended?.booleanValue === true, revokedAt: Number.isFinite(revoked) ? revoked : 0 };
+  return { suspended: f.suspended?.booleanValue === true, revokedAt: Number.isFinite(revoked) ? revoked : 0, admin: adminRes.ok };
 }
 
 // Autentica el pedido. Devuelve { uid, email, emailVerified, role, blocked, suspended }.
@@ -115,14 +124,15 @@ export async function authenticate(request, env, fetchImpl = fetch) {
       if (profile) {
         row.suspended = profile.suspended ? 1 : 0;
         row.revoked_at = profile.revokedAt;
+        row.fs_admin = profile.admin ? 1 : 0;
         row.checked_at = now;
       }
     } catch {
       // Si Firestore no responde se usa el último dato conocido.
     }
   }
-  const updates = env.DB.prepare("UPDATE users SET email = ?, suspended = ?, revoked_at = ?, checked_at = ?, last_seen_at = ? WHERE uid = ?")
-    .bind(String(claims.email || row.email).slice(0, 200), row.suspended, row.revoked_at, row.checked_at, now, uid);
+  const updates = env.DB.prepare("UPDATE users SET email = ?, suspended = ?, revoked_at = ?, fs_admin = ?, checked_at = ?, last_seen_at = ? WHERE uid = ?")
+    .bind(String(claims.email || row.email).slice(0, 200), row.suspended, row.revoked_at, row.fs_admin, row.checked_at, now, uid);
   if (now - row.last_seen_at > 60000 || row.checked_at === now) await updates.run();
 
   if (row.revoked_at && claims.auth_time <= row.revoked_at) fail(401, "Cerraste todas las sesiones. Volvé a iniciar sesión.", "auth");
@@ -131,7 +141,7 @@ export async function authenticate(request, env, fetchImpl = fetch) {
     uid,
     email: String(claims.email || ""),
     emailVerified: claims.email_verified === true,
-    role: isInitialOwner(env, uid) ? "owner" : row.role,
+    role: isInitialOwner(env, uid) || row.fs_admin ? "owner" : row.role,
     blocked: Boolean(row.blocked),
     suspended: Boolean(row.suspended)
   };

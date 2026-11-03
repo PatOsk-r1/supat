@@ -31,6 +31,9 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+        env:
+          # API del catálogo central (worker/README.md). No es secreta: el servidor valida cada sesión.
+          VITE_SUPAT_API: https://supat-api.pastillud.workers.dev
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

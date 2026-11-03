@@ -8,7 +8,7 @@ import { encryptSecrets, decryptSecrets, redact } from "./secrets.js";
 import { audit, auditStatement, log } from "./log.js";
 import { createJob, runPending, cancelJob, activeJob } from "./sync.js";
 import { stats } from "./catalog.js";
-import { isInitialOwner } from "./auth.js";
+import { isFixedOwner } from "./auth.js";
 
 const clip = (s, n) => String(s ?? "").trim().slice(0, n);
 
@@ -207,8 +207,8 @@ export const adminRoutes = {
 
   "GET /api/admin/users": async ({ env, url }) => {
     const limit = intParam(url, "limit", 200, 1, 500);
-    const { results } = await env.DB.prepare("SELECT uid, email, role, blocked, suspended, created_at, last_seen_at FROM users ORDER BY last_seen_at DESC LIMIT ?").bind(limit).all();
-    return { users: results.map(u => ({ uid: u.uid, email: u.email, role: isInitialOwner(env, u.uid) ? "owner" : u.role, initialOwner: isInitialOwner(env, u.uid), blocked: Boolean(u.blocked), suspended: Boolean(u.suspended), createdAt: u.created_at, lastSeenAt: u.last_seen_at })) };
+    const { results } = await env.DB.prepare("SELECT uid, email, role, blocked, suspended, fs_admin, created_at, last_seen_at FROM users ORDER BY last_seen_at DESC LIMIT ?").bind(limit).all();
+    return { users: results.map(u => ({ uid: u.uid, email: u.email, role: isFixedOwner(env, u) ? "owner" : u.role, initialOwner: isFixedOwner(env, u), blocked: Boolean(u.blocked), suspended: Boolean(u.suspended), createdAt: u.created_at, lastSeenAt: u.last_seen_at })) };
   },
 
   // Cambiar rol o bloqueo de OTRO usuario. Nadie cambia su propio rol (así no se pierde el
@@ -222,11 +222,11 @@ export const adminRoutes = {
     const sets = [], binds = [], changes = [];
     if ("role" in body) {
       if (!["owner", "user"].includes(body.role)) fail(400, "Rol inválido.");
-      if (isInitialOwner(env, target) && body.role !== "owner") fail(403, "Es propietario por configuración del servidor (OWNER_UIDS); se cambia ahí.");
+      if (isFixedOwner(env, row) && body.role !== "owner") fail(403, "Es propietario por configuración (OWNER_UIDS o administradores de Firebase); se cambia ahí.");
       sets.push("role = ?"); binds.push(body.role); changes.push(`rol ${row.role} → ${body.role}`);
     }
     if ("blocked" in body) {
-      if (isInitialOwner(env, target) && body.blocked) fail(403, "No se puede bloquear a un propietario por configuración.");
+      if (isFixedOwner(env, row) && body.blocked) fail(403, "No se puede bloquear a un propietario por configuración.");
       sets.push("blocked = ?"); binds.push(body.blocked ? 1 : 0); changes.push(body.blocked ? "bloqueado" : "desbloqueado");
     }
     if (!sets.length) fail(400, "No hay cambios.");

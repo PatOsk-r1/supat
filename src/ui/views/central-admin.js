@@ -151,13 +151,13 @@ function usersTab(ctx) {
   const me = ctx.account.user?.uid;
   return `<section class="settings-block" aria-labelledby="h-cusers">
     <h2 id="h-cusers">Usuarios y permisos (${users.length})</h2>
-    <p class="note">Aparecen las cuentas que ya usaron el catálogo central. "Propietario" puede administrar todo este panel. Los propietarios definidos en la configuración del servidor (OWNER_UIDS) no se pueden quitar desde acá, y nadie puede cambiar su propio rol.</p>
+    <p class="note">Aparecen las cuentas que ya usaron el catálogo central. "Propietario" puede administrar todo este panel. Los propietarios fijos (OWNER_UIDS del servidor o administradores de Firebase) no se pueden quitar desde acá, y nadie puede cambiar su propio rol.</p>
     ${users.length ? `<div class="table-wrap"><table class="admin-table">
       <thead><tr><th scope="col">Cuenta</th><th scope="col">Rol</th><th scope="col">Estado</th><th scope="col"><span class="sr-only">Acciones</span></th></tr></thead>
       <tbody>${users.map(u => {
         const self = u.uid === me;
         const roleKey = `crole:${u.uid}`, blockKey = `cblock:${u.uid}`;
-        const actions = self || u.initialOwner ? `<small class="uid">${self ? "Sos vos" : "Propietario por configuración"}</small>` : `
+        const actions = self || u.initialOwner ? `<small class="uid">${self ? "Sos vos" : "Propietario fijo (configuración o administrador de Firebase)"}</small>` : `
           <button type="button" class="secondary ${confirm === roleKey ? "confirming" : ""}" data-action="central-role" data-uid="${e(u.uid)}" data-role="${u.role === "owner" ? "user" : "owner"}" data-key="${e(roleKey)}">${confirm === roleKey ? "¿Seguro? Tocá de nuevo" : u.role === "owner" ? "Quitar propietario" : "Hacer propietario"}</button>
           <button type="button" class="${u.blocked ? "secondary" : "danger"} ${confirm === blockKey ? "confirming" : ""}" data-action="central-block" data-uid="${e(u.uid)}" data-blocked="${!u.blocked}" data-key="${e(blockKey)}">${confirm === blockKey ? "¿Seguro? Tocá de nuevo" : u.blocked ? "Desbloquear" : "Bloquear"}</button>`;
         return `<tr><td>${e(maskEmail(u.email))}<small class="uid">${e(u.uid.slice(0, 8))}… · último uso ${date(u.lastSeenAt)}</small></td>
