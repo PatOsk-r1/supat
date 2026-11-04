@@ -18,7 +18,7 @@ export function favButton(item, ctx, extraClass = "") {
 }
 
 export function providerBadge(item) {
-  return `<span class="badge ${item.isDemo ? "badge-demo" : ""}" title="Origen del contenido">${e(item.providerName)}</span>`;
+  return `<span class="badge" title="Origen del contenido">${e(item.providerName)}</span>`;
 }
 
 export function posterCard(item, ctx) {
@@ -26,7 +26,7 @@ export function posterCard(item, ctx) {
   return `<article class="card">
     <a class="poster ${e(item.color)}" href="${openHref(item)}" data-key="open:${e(item.id)}" aria-label="${e(item.title)}">
       ${img(item.poster)}
-      <span class="poster-mark">${KINDS[item.kind].mark}${item.isDemo ? " · DEMO" : ""}</span>
+      <span class="poster-mark">${KINDS[item.kind].mark}</span>
       ${item.poster ? "" : `<span class="poster-title">${e(item.title)}</span>`}
       ${item.rating ? `<span class="poster-rating">★ ${item.rating.toFixed(1)}</span>` : ""}
     </a>
@@ -102,6 +102,17 @@ export function select(name, options, selected, label) {
     <select data-action="filter-select" data-name="${e(name)}" data-key="sel:${e(name)}" aria-label="${e(label)}">
       ${options.map(([value, text]) => `<option value="${e(value)}" ${selected === value ? "selected" : ""}>${e(text)}</option>`).join("")}
     </select></label>`;
+}
+
+// Qué mostrar cuando no hay títulos: sin contenido de relleno, con el motivo real.
+export function catalogEmpty(ctx, what = "títulos") {
+  const st = ctx.catalog.status("central");
+  const a = ctx.account;
+  if (st.state === "loading" || (!a.ready && st.state !== "ok")) return `<div class="empty" role="status"><div class="xp-spinner"></div>Cargando el catálogo…</div>`;
+  if (!a.signedIn) return empty("Iniciá sesión para ver el catálogo.", "El catálogo de Supat es para usuarios registrados.", `<a class="primary" href="#/cuenta">Ingresar</a>`);
+  if (!a.verified) return empty("Verificá tu correo para ver el catálogo.", "Tocá el enlace del mail que te enviamos y después \"Ya lo verifiqué\" en tu perfil.", `<a class="primary" href="#/perfil">Ir a mi perfil</a>`);
+  if (st.state === "error") return empty("El catálogo no está disponible.", st.error || "Probá de nuevo en unos minutos.", a.isOwner ? `<a class="primary" href="#/ajustes">Ir a Fuentes de contenido</a>` : "");
+  return empty(`Todavía no hay ${what} en el catálogo.`, a.isOwner ? "Revisá la fuente de contenido y la importación en Ajustes." : "Volvé a mirar más tarde.");
 }
 
 export function empty(title, detail = "", actionHtml = "") {

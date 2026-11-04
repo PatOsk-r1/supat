@@ -43,7 +43,7 @@ test("sin sesión: todas las rutas (menos /api/health) piden iniciar sesión", a
   const env = makeEnv();
   assert.equal((await api(env, "GET", "/api/health")).status, 200);
   for (const [m, p] of [["GET", "/api/me"], ["GET", "/api/catalog/titles"], ["GET", "/api/catalog/search?q=a"], ["GET", "/api/catalog/titles/1"], ["GET", "/api/catalog/titles/1/play"],
-    ["GET", "/api/admin/providers"], ["POST", "/api/admin/providers"], ["GET", "/api/admin/users"], ["PATCH", "/api/admin/users/x"], ["GET", "/api/admin/logs"]]) {
+    ["GET", "/api/admin/providers"], ["PUT", "/api/admin/source"], ["POST", "/api/admin/source/test"], ["GET", "/api/admin/users"], ["PATCH", "/api/admin/users/x"], ["GET", "/api/admin/logs"]]) {
     const r = await api(env, m, p);
     assert.equal(r.status, 401, `${m} ${p}`);
   }
@@ -53,7 +53,7 @@ test("roles: el dueño sale de OWNER_UIDS; los demás son 'user' y no entran al 
   const env = makeEnv();
   assert.equal((await api(env, "GET", "/api/me", { uid: "dueno" })).body.role, "owner");
   assert.equal((await api(env, "GET", "/api/me", { uid: "ana" })).body.role, "user");
-  for (const [m, p] of [["GET", "/api/admin/providers"], ["POST", "/api/admin/providers"], ["GET", "/api/admin/users"], ["PATCH", "/api/admin/users/ana"], ["GET", "/api/admin/logs"], ["POST", "/api/admin/catalog/reindex"]]) {
+  for (const [m, p] of [["GET", "/api/admin/providers"], ["PUT", "/api/admin/source"], ["POST", "/api/admin/source/test"], ["GET", "/api/admin/users"], ["PATCH", "/api/admin/users/ana"], ["GET", "/api/admin/logs"], ["POST", "/api/admin/catalog/reindex"]]) {
     const r = await api(env, m, p, { uid: "ana", body: m === "GET" ? null : { role: "owner" } });
     assert.equal(r.status, 403, `${m} ${p}`);
   }

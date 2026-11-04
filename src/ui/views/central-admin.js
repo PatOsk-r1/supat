@@ -1,12 +1,10 @@
-// Panel del propietario para el catálogo central: proveedores (configurar, probar, activar,
-// sincronizar), trabajos de importación, usuarios y permisos, registros técnicos e infraestructura.
-// Todo lo valida el servidor; esta pantalla nunca recibe credenciales guardadas.
+// Panel del propietario para el catálogo: trabajos de importación, usuarios y permisos, registros
+// técnicos e infraestructura. La fuente de contenido se configura en Ajustes → Fuentes de contenido.
+// Todo lo valida el servidor; esta pantalla nunca recibe credenciales.
 import { escapeHtml as e } from "../../app/util.js";
-import { KINDS } from "../../catalog/model.js";
 import { API_BASE } from "../../app/api.js";
 
 export const CENTRAL_TABS = [
-  ["proveedores", "Proveedores"],
   ["sincronizacion", "Sincronización"],
   ["usuarios", "Usuarios y permisos"],
   ["registros", "Registros"],
@@ -17,7 +15,7 @@ const date = ms => (ms ? new Date(ms).toLocaleString("es", { dateStyle: "short",
 const JOB_STATUS = { queued: "En cola", running: "En curso", done: "Terminado", failed: "Falló", cancelled: "Cancelado" };
 const JOB_PHASE = { items: "títulos", episodes: "episodios", finish: "cerrando" };
 const LEVELS = { info: "Info", warn: "Aviso", error: "Error" };
-const ACTIONS = { "provider-create": "Creó el proveedor", "provider-update": "Cambió el proveedor", "provider-test": "Probó la conexión de", "sync-full": "Importación completa de", "sync-incremental": "Sincronizó", "sync-cancel": "Canceló el trabajo", "user-update": "Cambió permisos de", "catalog-reindex": "Reconstruyó el índice" };
+const ACTIONS = { "source-create": "Configuró la fuente", "source-update": "Cambió la fuente", "source-test": "Probó la conexión de", "provider-create": "Creó el proveedor", "provider-update": "Cambió el proveedor", "provider-test": "Probó la conexión de", "sync-full": "Importación completa de", "sync-incremental": "Sincronizó", "sync-cancel": "Canceló el trabajo", "user-update": "Cambió permisos de", "catalog-reindex": "Reconstruyó el índice" };
 
 // Correo enmascarado: alcanza para reconocer la cuenta sin mostrar el dato completo.
 export const maskEmail = m => {
@@ -27,101 +25,11 @@ export const maskEmail = m => {
 
 // Qué datos necesita cada pestaña (las carga app.js con centralAdmin).
 export const TAB_DATA = {
-  proveedores: ["adapters", "providers"],
   sincronizacion: ["providers", "jobs"],
   usuarios: ["users"],
   registros: ["logs", "audit", "providers"],
   infraestructura: ["stats", "providers"]
 };
-
-function statusBadge(p) {
-  if (!p.enabled) return `<span class="badge badge-off">Inactivo</span>`;
-  if (p.activeJob) return `<span class="badge">Sincronizando</span>`;
-  if (p.lastStatus === "error") return `<span class="badge badge-off">Con problemas</span>`;
-  return `<span class="badge badge-on">Activo</span>`;
-}
-
-function field(f, provider, prefix) {
-  const id = `${prefix}-${f.key}`;
-  const help = f.help ? `<small id="${id}-help">${e(f.help)}</small>` : "";
-  const described = f.help ? `aria-describedby="${id}-help"` : "";
-  const label = `<label for="${id}">${e(f.label)}${f.required ? " *" : ""}</label>`;
-  if (f.secret) {
-    const set = provider?.secretsSet?.includes(f.key);
-    return `<div class="field">${label}
-      <input id="${id}" name="${e(f.key)}" type="password" autocomplete="new-password" spellcheck="false" placeholder="${set ? "Guardada · dejá vacío para conservarla" : ""}" ${described}>
-      ${set ? `<label class="check"><input type="checkbox" name="__clear_${e(f.key)}"> Borrar la guardada</label>` : ""}${help}</div>`;
-  }
-  let value = provider?.config?.[f.key] ?? "";
-  if (f.type === "json" && value) { try { value = JSON.stringify(JSON.parse(value), null, 2); } catch { /* se muestra tal cual */ } }
-  if (f.type === "json" || f.type === "textarea") {
-    return `<div class="field">${label}<textarea id="${id}" name="${e(f.key)}" rows="${f.type === "json" ? 14 : 3}" spellcheck="false" class="${f.type === "json" ? "code" : ""}" ${described}>${e(value)}</textarea>${help}</div>`;
-  }
-  const type = f.type === "number" ? "number" : f.type === "url" ? "url" : "text";
-  return `<div class="field">${label}<input id="${id}" name="${e(f.key)}" type="${type}" value="${e(value)}" autocomplete="off" spellcheck="false" ${described}>${help}</div>`;
-}
-
-function providerForm(ctx, adapter, provider) {
-  const prefix = `cp-${provider?.id || "nuevo"}`;
-  const c = ctx.state.central;
-  const test = c.testResult?.id === (provider?.id || "nuevo") ? c.testResult : null;
-  return `<form class="provider-form" data-form="central-provider" data-id="${e(provider?.id || "")}" data-adapter="${e(adapter.id)}">
-    <div class="field"><label for="${prefix}-label">Nombre</label><input id="${prefix}-label" name="__label" value="${e(provider?.label || adapter.name)}" maxlength="60"></div>
-    <div class="field"><label for="${prefix}-schedule">Sincronización automática</label>
-      <select id="${prefix}-schedule" name="__schedule">${[["daily", "Todos los días (cambios)"], ["manual", "Solo manual"]].map(([v, t]) => `<option value="${v}" ${(provider?.schedule || "daily") === v ? "selected" : ""}>${t}</option>`).join("")}</select></div>
-    <div class="field"><label for="${prefix}-priority">Prioridad al reproducir</label><input id="${prefix}-priority" name="__priority" type="number" min="0" max="1000" value="${e(provider?.priority ?? 100)}" aria-describedby="${prefix}-priority-help"><small id="${prefix}-priority-help">Menor número = se prueba primero cuando un título está en varios proveedores.</small></div>
-    ${adapter.fields.map(f => field(f, provider, prefix)).join("")}
-    <p class="note">Las credenciales se guardan cifradas en el servidor y nunca vuelven al navegador.</p>
-    <div class="form-actions">
-      <button type="submit" class="primary">${provider ? "Guardar cambios" : "Crear proveedor"}</button>
-      ${provider ? `<button type="button" class="secondary" data-action="central-test" data-id="${e(provider.id)}" data-key="ctest:${e(provider.id)}">Probar conexión</button>` : ""}
-      <button type="button" class="link" data-action="central-edit" data-id="" data-key="cedit-cerrar">Cerrar</button>
-    </div>
-    ${test ? `<p class="note ${test.ok ? "ok" : "form-error"}" role="status">${test.ok ? "✔" : "✖"} ${e(test.message)}${test.sample?.length ? ` · Ejemplos: ${e(test.sample.join(", "))}` : ""}</p>` : ""}
-  </form>`;
-}
-
-function providersTab(ctx) {
-  const c = ctx.state.central;
-  const { adapters = [], providers = [] } = c.data;
-  const confirm = ctx.state.confirm;
-  const cards = providers.map(p => {
-    const adapter = adapters.find(a => a.id === p.adapter);
-    const editing = c.editing === p.id;
-    const fullKey = `cfull:${p.id}`;
-    return `<article class="provider ${p.enabled ? "" : "is-off"}">
-      <header class="provider-head"><div>
-        <h3>${e(p.label)} ${statusBadge(p)}</h3>
-        <p class="provider-origin">${e(p.adapterName)} · ${p.schedule === "daily" ? "sincroniza todos los días" : "solo sincronización manual"} · prioridad ${p.priority}${p.incremental ? " · admite cambios incrementales" : ""}</p>
-        <div class="genres provider-caps">${p.kinds.map(k => `<span class="genre">${e(KINDS[k]?.label || k)}</span>`).join("")}${p.secretsSet.length ? `<span class="genre cap">Credenciales: ${e(p.secretsSet.join(", "))}</span>` : ""}</div>
-      </div></header>
-      <div class="provider-status status-${p.lastStatus === "error" ? "error" : p.enabled ? "ok" : "disabled"}" role="status">
-        Última sincronización completa: ${date(p.lastSyncAt)}
-        ${p.activeJob ? ` · <strong>Trabajo ${p.activeJob.id} ${JOB_STATUS[p.activeJob.status].toLowerCase()}</strong> (${JOB_PHASE[p.activeJob.phase] || p.activeJob.phase}, ${p.activeJob.pages} páginas)` : ""}
-        ${p.lastError ? `<span class="provider-error">${e(p.lastError)}</span>` : ""}
-      </div>
-      ${editing && adapter ? providerForm(ctx, adapter, p) : ""}
-      <div class="provider-actions">
-        ${editing ? "" : `<button type="button" class="secondary" data-action="central-edit" data-id="${e(p.id)}" data-key="cedit:${e(p.id)}">Configurar</button>`}
-        <button type="button" class="secondary" data-action="central-toggle" data-id="${e(p.id)}" data-enabled="${!p.enabled}" data-key="ctoggle:${e(p.id)}">${p.enabled ? "Desactivar" : "Activar"}</button>
-        ${p.enabled ? `<button type="button" class="secondary" data-action="central-sync" data-id="${e(p.id)}" data-mode="incremental" data-key="csync:${e(p.id)}">Sincronizar ahora</button>
-          <button type="button" class="danger ${confirm === fullKey ? "confirming" : ""}" data-action="central-sync" data-id="${e(p.id)}" data-mode="full" data-key="${e(fullKey)}">${confirm === fullKey ? "¿Importar todo? Tocá de nuevo" : "Importación completa"}</button>` : ""}
-      </div>
-    </article>`;
-  }).join("");
-
-  const newAdapter = adapters.find(a => a.id === c.newAdapter);
-  return `<section class="settings-block" aria-labelledby="h-cprov">
-    <h2 id="h-cprov">Proveedores del catálogo central (${providers.length})</h2>
-    <p class="note">Cada proveedor importa sus títulos al catálogo que comparten todos los usuarios. Un proveedor nuevo empieza desactivado: probá la conexión y después activalo.</p>
-    ${cards || `<p class="note">Todavía no hay proveedores en el servidor.</p>`}
-    ${c.editing === "nuevo" && newAdapter ? `<article class="provider"><h3>Nuevo: ${e(newAdapter.name)}</h3><p>${e(newAdapter.description)}</p>${providerForm(ctx, newAdapter, null)}</article>` : `<div class="add-provider">
-      <label for="cadd-type">Agregar proveedor</label>
-      <select id="cadd-type">${adapters.map(a => `<option value="${e(a.id)}">${e(a.name)}</option>`).join("")}</select>
-      <button type="button" class="secondary" data-action="central-new" data-key="central-new">Agregar</button>
-    </div>`}
-  </section>`;
-}
 
 function jobsTab(ctx) {
   const { jobs = [], providers = [] } = ctx.state.central.data;
@@ -129,7 +37,7 @@ function jobsTab(ctx) {
   const confirm = ctx.state.confirm;
   return `<section class="settings-block" aria-labelledby="h-cjobs">
     <h2 id="h-cjobs">Trabajos de importación</h2>
-    <p class="note">Los trabajos avanzan por tandas: el servidor sigue solo cada 10 minutos y la sincronización diaria arranca a las 05:00 (UTC). "Continuar" procesa la siguiente tanda ya mismo.</p>
+    <p class="note">Los trabajos avanzan por tandas: el servidor sigue solo cada minuto y la sincronización diaria arranca a las 05:00 (UTC). "Continuar" procesa la siguiente tanda ya mismo. La fuente se configura en <a href="#/ajustes">Ajustes → Fuentes de contenido</a>.</p>
     ${jobs.length ? `<div class="table-wrap"><table class="admin-table">
       <thead><tr><th scope="col">Trabajo</th><th scope="col">Estado</th><th scope="col">Avance</th><th scope="col"><span class="sr-only">Acciones</span></th></tr></thead>
       <tbody>${jobs.map(j => {
@@ -206,7 +114,7 @@ function infraTab(ctx) {
   </section>`;
 }
 
-const TABS = { proveedores: providersTab, sincronizacion: jobsTab, usuarios: usersTab, registros: logsTab, infraestructura: infraTab };
+const TABS = { sincronizacion: jobsTab, usuarios: usersTab, registros: logsTab, infraestructura: infraTab };
 
 export function renderCentralTab(ctx) {
   const c = ctx.state.central;

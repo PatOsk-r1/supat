@@ -7,6 +7,7 @@ import { authenticate, requireUser, requireOwner } from "./auth.js";
 import { listTitles, searchTitles, titleDetail } from "./catalog.js";
 import { resolvePlayback } from "./play.js";
 import { adminRoutes } from "./admin.js";
+import { sourceAdminRoutes, catalogStatus } from "./source.js";
 import { runPending, scheduleDaily, fetchEpisodesNow } from "./sync.js";
 import { log } from "./log.js";
 import { KINDS } from "./providers/contract.js";
@@ -24,6 +25,9 @@ const idParam = v => {
 
 const userRoutes = {
   "GET /api/me": async ({ user }) => ({ uid: user.uid, role: user.role, emailVerified: user.emailVerified, blocked: user.blocked, suspended: user.suspended }),
+
+  // Estado del catálogo (configurado, disponible, importando) sin detalles técnicos.
+  "GET /api/catalog/status": async ({ env }) => catalogStatus(env),
 
   "GET /api/catalog/titles": async ({ env, url }) => listTitles(env, {
     kind: kindParam(url), page: intParam(url, "page", 1, 1, 10000), pageSize: intParam(url, "pageSize", 50, 1, 200),
@@ -72,7 +76,7 @@ function compile(routes) {
   });
 }
 const USER = compile(userRoutes);
-const ADMIN = compile(adminRoutes);
+const ADMIN = compile({ ...adminRoutes, ...sourceAdminRoutes });
 
 function match(table, method, pathname) {
   let pathFound = false;

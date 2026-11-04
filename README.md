@@ -1,29 +1,39 @@
 # Supat
 
-Aplicación web de streaming: TV en vivo, películas, series y anime.
-Es una **aplicación independiente**: **no trae canales, credenciales ni fuentes privadas**.
-Todo lo que se reproduce viene de proveedores que configurás vos y que tenés permiso de usar.
+Aplicación web de streaming: películas, series y anime.
+Es una **aplicación independiente**: **no trae contenido, credenciales ni catálogos de ejemplo**.
+Todo lo que se muestra y reproduce viene de **una única fuente de contenido** que configura el propietario en Ajustes.
 
 **Abrir en línea:** https://supat-h8tfw.web.app
 
 ## Cuentas de usuario
 
-Registro con correo y contraseña, verificación del correo, recuperación y cambio de contraseña, cerrar todas las sesiones y eliminar la cuenta. Con una cuenta se guardan **favoritos, listas (privadas o públicas) e historial**, y se ven en cualquier dispositivo. El catálogo se explora sin cuenta. La seguridad está explicada en **[SEGURIDAD.md](SEGURIDAD.md)**.
+Registro con correo y contraseña, verificación del correo, recuperación y cambio de contraseña, cerrar todas las sesiones y eliminar la cuenta. Con una cuenta se guardan **favoritos, listas (privadas o públicas) e historial**, y se ven en cualquier dispositivo. Para ver el catálogo hace falta una cuenta con el correo verificado. La seguridad está explicada en **[SEGURIDAD.md](SEGURIDAD.md)**.
 
-## Catálogo central (servidor)
+## Catálogo (servidor) y fuente de contenido
 
-Un catálogo **compartido por todos los usuarios**, con un servidor en Cloudflare Workers y una base D1, ambos gratuitos. El propietario incorpora proveedores desde **Perfil → Panel de administración**: los configura, prueba la conexión, los activa y los sincroniza.
+El catálogo es **uno solo, compartido por todos los usuarios**. Lo arma un servidor en Cloudflare Workers con una base D1, ambos gratuitos, a partir de **una única fuente externa**.
 
-El servidor se encarga de:
+El propietario configura la fuente en **Ajustes → Fuentes de contenido**:
 
-- **Importar los títulos por tandas:** el proceso se puede retomar si se corta y reintenta solo ante fallas temporales.
+- nombre y dirección base de la API;
+- la **API Key**, que solo se usa para el catálogo;
+- la **credencial de reproducción**, que solo se usa para pedir los enlaces;
+- las categorías: películas, series, anime y temporadas/episodios;
+- la especificación de rutas del adaptador.
+
+Desde ahí también ve el estado de conexión y prueba la conexión.
+
+Al guardar una configuración que funciona, el servidor se encarga de:
+
+- **Importar todo:** recorre todas las páginas, por tandas. Si se corta, sigue donde quedó; si falla, reintenta.
 - **Actualizar todos los días** de forma automática.
 - **Unir duplicados** usando los identificadores de TMDb e IMDb.
-- **Resolver la fuente** al reproducir. Las credenciales de los proveedores quedan solo en el servidor.
+- **Resolver los enlaces** al reproducir.
 
-En la app aparece como el proveedor "Catálogo central de Supat". Necesita iniciar sesión con el correo verificado. Los proveedores del navegador siguen igual.
+Las credenciales quedan **cifradas en el servidor** y nunca llegan al navegador. Si la fuente no está configurada o falla, la app muestra que el catálogo no está disponible. No muestra contenido de relleno.
 
-Detalles, instalación y publicación: **[worker/README.md](worker/README.md)**.
+Detalles, formato de la especificación, instalación y publicación: **[worker/README.md](worker/README.md)**.
 
 ## Cómo abrirla en tu PC (Windows)
 
@@ -49,38 +59,28 @@ En **PowerShell** escribí `npm.cmd` en vez de `npm` (por ejemplo `npm.cmd run d
 | `npm run emuladores` + `npm run dev:emu` | La app contra los emuladores locales de Firebase, con cuentas de prueba. |
 | `firebase deploy --only hosting,firestore:rules` | Publica la app y las reglas en Firebase. |
 | `npm run build` | Versión final optimizada en `dist/`. |
-| `npm run page` | Arma `publish/supat.html`, una vista previa de un solo archivo (solo con contenido de demostración). |
+| `npm run api:dev` / `npm run api:publicar` | API del catálogo en tu PC / publicarla en Cloudflare (ver worker/README.md). |
 
 ## Qué tiene
 
 - **Inicio:** carrusel de destacados, "Seguir viendo", favoritos y filas por tipo y categoría.
-- **TV en vivo:** guía estilo IPTV con categorías, lista de canales con el programa actual (si hay guía XMLTV) y vista previa.
-- **Películas y Series:** grilla con filtros por categoría, proveedor y orden; detalle con sinopsis, reparto y temporadas/episodios.
+- **Películas, Series y Anime:** grilla con filtros por categoría y orden; detalle con sinopsis, reparto y temporadas/episodios. Las secciones sin contenido importado no aparecen en el menú.
 - **Reproductor propio:** HLS (`.m3u8`) con hls.js o el reproductor del navegador, MP4/WebM, controles, calidad, pantalla completa, teclado (espacio, F, M, flechas), mensajes de error claros y "seguir desde donde lo dejaste".
-- **Búsqueda** sin acentos ("accion" encuentra "Acción"), tecla `/` para buscar.
+- **Búsqueda** sin acentos ("accion" encuentra "Acción"), en lo cargado y en todo el catálogo del servidor (paginada). Tecla `/` para buscar.
 - **Favoritos, progreso y ajustes** guardados en el navegador.
 - **Navegación con flechas** entre tarjetas, como con el control remoto de una app de TV.
 - Diseño adaptable a PC, tablet y celular (barra inferior en el celular).
 
-## Proveedores de contenido (Ajustes → Proveedores)
+## Datos opcionales de TMDb
 
-| Proveedor | Qué aporta | Configuración |
-|---|---|---|
-| **Internet Archive** | Películas clásicas de dominio público o con licencia abierta (archive.org). | Ninguna. Viene activado. Se puede cambiar la búsqueda. |
-| **Lista de canales (M3U)** | TV en vivo (y películas o series si la lista las tiene), con guía XMLTV opcional. | Dirección de la lista o archivo `.m3u`. Usá solo listas autorizadas. |
-| **Servidor Jellyfin** | Tu propia colección de películas y series. | Dirección del servidor y clave de API ([jellyfin.org](https://jellyfin.org), gratis). |
-| **Demostración** | Títulos ficticios sin video, para ver la estructura. | Ninguna. Se puede desactivar. |
-
-Se pueden tener varios proveedores del mismo tipo (por ejemplo, dos listas M3U), activarlos, desactivarlos, actualizarlos y quitarlos. Cada título muestra de qué proveedor viene.
-
-**TMDb (opcional):** con una clave gratuita de [themoviedb.org](https://www.themoviedb.org/settings/api) la app completa pósters, sinopsis, reparto y episodios. Se carga en Ajustes y se guarda solo en tu navegador.
+Con una clave gratuita de [themoviedb.org](https://www.themoviedb.org/settings/api) la app completa pósters, sinopsis, reparto y episodios. Se carga en Ajustes y se guarda solo en tu navegador.
 *Este producto usa la API de TMDb, pero no está respaldado ni certificado por TMDb.*
 
 ### Límites conocidos
 
-- **CORS:** algunos servidores no permiten que otra página web lea sus listas o transmisiones, aunque funcionen en VLC. La app lo avisa. Para listas, se puede cargar el archivo descargado.
+- **CORS:** algunos servidores de video no permiten que otra página web lea sus transmisiones. El reproductor lo avisa.
 - **DRM:** la app no reproduce contenido protegido con DRM ni intenta saltarlo.
-- La **vista previa publicada** (`npm run page`) solo muestra la demostración, porque ese visor bloquea las conexiones externas.
+- **Enlaces con credenciales:** si la fuente entrega enlaces de reproducción que contienen la credencial, el servidor no los entrega, porque la expondría. Para eso haría falta un proxy de video, que no está implementado.
 
 ## Estructura
 
@@ -88,11 +88,12 @@ Se pueden tener varios proveedores del mismo tipo (por ejemplo, dos listas M3U),
 src/
   app/         ajustes, favoritos, progreso, caché (IndexedDB), rutas
   catalog/     modelo de datos, almacén del catálogo, TMDb
-  providers/   un archivo por tipo de proveedor + registro + lectores M3U y XMLTV
+  providers/   registro y contrato de proveedores; central.js = el catálogo del servidor
+               (internet-archive, m3u, jellyfin y xmltv quedan en el código, fuera de la app)
   player/      motor (hls.js / nativo) y reproductor con controles
   ui/          controlador (app.js), piezas reutilizables y una vista por pantalla
 worker/        API del catálogo central (Cloudflare Worker + D1): ver worker/README.md
-tests/         pruebas automáticas (node --test) y archivos de prueba
+tests/         pruebas automáticas (node --test); los datos ficticios viven solo en tests/fixtures
 ```
 
 Para sumar un proveedor, ver **[PROVEEDORES.md](PROVEEDORES.md)**: contrato común, capacidades, límites, seguridad y pruebas.

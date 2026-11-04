@@ -2,8 +2,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-// Solo el proveedor de demostración: las pruebas no deben depender de internet.
-const data = { "supat:ajustes": JSON.stringify({ providers: [{ id: "demo", type: "demo", enabled: true }] }) };
+// Solo un proveedor de prueba con datos ficticios aislados (tests/fixtures): sin internet.
+const data = { "supat:ajustes": JSON.stringify({ providers: [{ id: "demo", type: "prueba", enabled: true }] }) };
 globalThis.localStorage = {
   getItem: k => (k in data ? data[k] : null),
   setItem: (k, v) => { data[k] = String(v); },
@@ -13,22 +13,23 @@ globalThis.localStorage = {
 const { catalog } = await import("../src/catalog/store.js");
 const { KINDS, normalizeItem, findEpisode, nextEpisode } = await import("../src/catalog/model.js");
 const registry = await import("../src/providers/registry.js");
-const { demoItems } = await import("../src/providers/demo-data.js");
+const { testItems: demoItems, testProvider } = await import("./fixtures/catalogo-prueba.js");
+registry.registerProviderType(testProvider);
 const { escapeHtml } = await import("../src/app/util.js");
 const { createFavorites } = await import("../src/app/favorites.js");
 const { searchItems, fold } = await import("../src/ui/views/lists.js");
 const { sortItems } = await import("../src/ui/views/browse.js");
 
-test("el catálogo carga los elementos de demostración, marcados como demo y con su origen", async () => {
+test("el catálogo carga los elementos del proveedor, con su origen", async () => {
   await catalog.load();
   const items = catalog.all();
   assert.equal(items.length, demoItems.length);
-  assert.ok(items.every(x => x.isDemo && x.providerId === "demo" && x.providerName === "Demostración"));
+  assert.ok(items.every(x => x.providerId === "demo" && x.providerName === "Prueba"));
   assert.ok(items.every(x => KINDS[x.kind]));
   assert.equal(catalog.status("demo").state, "ok");
 });
 
-test("los ids no se repiten y ningún elemento demo trae fuente de video", () => {
+test("los ids no se repiten y los elementos de prueba no traen fuente de video", () => {
   const items = catalog.all();
   assert.equal(new Set(items.map(x => x.id)).size, items.length);
   assert.ok(items.every(x => x.source === null));
@@ -75,7 +76,7 @@ test("búsqueda sin acentos, por varias palabras y título primero", () => {
   assert.equal(fold("Acción"), "accion");
   assert.deepEqual(searchItems(items, "codigo").map(x => x.title), ["Código Azul"]);
   assert.ok(searchItems(items, "accion").length >= 2);
-  assert.deepEqual(searchItems(items, "canal 2").map(x => x.title), ["Canal de demostración 2"]);
+  assert.deepEqual(searchItems(items, "canal 2").map(x => x.title), ["Canal de prueba 2"]);
   assert.equal(searchItems(items, "   ").length, 0);
 });
 
@@ -104,17 +105,25 @@ test("favoritos: datos dañados no rompen la app", () => {
   assert.equal(createFavorites().size, 0);
 });
 
-test("proveedores: agregar, validar campos obligatorios y quitar", () => {
+test("proveedores: agregar, validar campos obligatorios y quitar (adaptadores que ya no están en la app)", async () => {
+  const jellyfin = (await import("../src/providers/jellyfin.js")).default;
+  const m3u = (await import("../src/providers/m3u.js")).default;
+  registry.registerProviderType(jellyfin);
+  registry.registerProviderType(m3u);
   assert.deepEqual(registry.validateConfig(registry.getInstance("demo")), []);
   const jf = registry.addInstance("jellyfin");
   assert.equal(jf.enabled, false);
   assert.equal(registry.validateConfig(jf).length, 2);
-  const m3u = registry.addInstance("m3u");
-  assert.match(registry.validateConfig(m3u)[0], /dirección de la lista/);
-  assert.equal(registry.validateConfig(registry.updateInstance(m3u.id, { config: { url: "https://x/l.m3u" } })).length, 0);
+  const lista = registry.addInstance("m3u");
+  assert.match(registry.validateConfig(lista)[0], /dirección de la lista/);
+  assert.equal(registry.validateConfig(registry.updateInstance(lista.id, { config: { url: "https://x/l.m3u" } })).length, 0);
   registry.removeInstance(jf.id);
-  registry.removeInstance(m3u.id);
+  registry.removeInstance(lista.id);
+  registry.unregisterProviderType("jellyfin");
+  registry.unregisterProviderType("m3u");
   assert.deepEqual(registry.getInstances().map(i => i.id), ["demo"]);
-  // Internet Archive viene activado por defecto para quien no configuró nada.
-  assert.deepEqual(registry.defaultInstances().map(i => [i.id, i.enabled]), [["archive", true], ["demo", true]]);
+});
+
+test("la app no trae catálogos de ejemplo: sin servidor configurado no hay ningún proveedor por defecto", () => {
+  assert.deepEqual(registry.defaultInstances(), []);
 });

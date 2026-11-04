@@ -17,6 +17,33 @@ import { log } from "./log.js";
 import { redact } from "./secrets.js";
 
 const MAX_ATTEMPTS = 5;
+const MAX_STALLS = 5;        // ejecuciones que se cortaron sin guardar avance (por ejemplo, por el límite de CPU)
+const DB_BUDGET = 38;        // consultas a D1 por ejecución (el plan gratuito permite 50)
+
+const episodesOn = (def, config) => (def.episodesEnabled ? def.episodesEnabled(config) : Boolean(def.listEpisodes));
+
+// Cuenta las consultas a D1 de esta ejecución (un batch cuenta como una), para cortar antes del límite.
+function countingDb(db) {
+  const counter = { n: 0 };
+  const wrap = stmt => new Proxy(stmt, {
+    get(target, prop) {
+      if (prop === "__target") return target; // D1 recibe en batch() la consulta original, no el envoltorio
+      if (prop === "bind") return (...args) => wrap(target.bind(...args));
+      if (["first", "all", "run", "raw"].includes(prop)) return (...args) => { counter.n++; return target[prop](...args); };
+      const v = target[prop];
+      return typeof v === "function" ? v.bind(target) : v;
+    }
+  });
+  const proxy = new Proxy(db, {
+    get(target, prop) {
+      if (prop === "prepare") return sql => wrap(target.prepare(sql));
+      if (prop === "batch") return stmts => { counter.n++; return target.batch(stmts.map(s => s.__target || s)); };
+      const v = target[prop];
+      return typeof v === "function" ? v.bind(target) : v;
+    }
+  });
+  return { db: proxy, counter };
+}
 const LOCK_MS = 90 * 1000;
 const RUN_WALL_MS = 20 * 1000;
 const INCREMENTAL_MARGIN_MS = 3600 * 1000;
@@ -51,7 +78,9 @@ async function claim(env, now, onlyJobId = null) {
     ? await env.DB.prepare(`SELECT id FROM sync_jobs WHERE id = ? AND status IN ${ACTIVE_STATES} AND locked_until < ?`).bind(onlyJobId, now).first()
     : await env.DB.prepare(`SELECT id FROM sync_jobs WHERE status IN ${ACTIVE_STATES} AND next_run_at <= ? AND locked_until < ? ORDER BY next_run_at, id LIMIT 1`).bind(now, now).first();
   if (!row) return null;
-  const res = await env.DB.prepare(`UPDATE sync_jobs SET locked_until = ?, status = 'running', started_at = COALESCE(started_at, ?) WHERE id = ? AND locked_until < ? AND status IN ${ACTIVE_STATES} RETURNING *`)
+  // "stalls" sube al tomar el trabajo y vuelve a 0 cuando se guarda avance: si una ejecución
+  // se corta (límite de CPU o de tiempo) sin guardar, queda contada.
+  const res = await env.DB.prepare(`UPDATE sync_jobs SET locked_until = ?, status = 'running', started_at = COALESCE(started_at, ?), stalls = stalls + 1 WHERE id = ? AND locked_until < ? AND status IN ${ACTIVE_STATES} RETURNING *`)
     .bind(now + LOCK_MS, now, row.id, now).first();
   return res || null;
 }
@@ -59,15 +88,23 @@ async function claim(env, now, onlyJobId = null) {
 function saveJob(env, job, cursor, extra = {}) {
   const f = { ...job, ...extra };
   return env.DB.prepare(`UPDATE sync_jobs SET status = ?, cursor_json = ?, pages = ?, seen = ?, created = ?, updated = ?, merged = ?, unchanged = ?, conflicts = ?, skipped = ?, episodes = ?,
-    attempts = ?, next_run_at = ?, locked_until = ?, last_error = ?, finished_at = ? WHERE id = ?`)
+    attempts = ?, next_run_at = ?, locked_until = ?, last_error = ?, finished_at = ?, stalls = 0 WHERE id = ?`)
     .bind(f.status, JSON.stringify(cursor), f.pages, f.seen, f.created, f.updated, f.merged, f.unchanged, f.conflicts, f.skipped, f.episodes,
       f.attempts, f.next_run_at, f.locked_until, String(f.last_error || "").slice(0, 500), f.finished_at ?? null, f.id).run();
 }
 
 // Procesa una tanda de un trabajo ya tomado. Devuelve el trabajo actualizado.
-export async function runJobStep(env, job, { fetchImpl = fetch, pages = Number(env.SYNC_PAGES_PER_RUN) || 3, deadline = Date.now() + RUN_WALL_MS } = {}) {
+export async function runJobStep(baseEnv, job, { fetchImpl = fetch, pages = Number(baseEnv.SYNC_PAGES_PER_RUN) || 3, deadline = Date.now() + RUN_WALL_MS } = {}) {
+  const { db, counter } = countingDb(baseEnv.DB);
+  const env = { ...baseEnv, DB: db };
   const provider = await env.DB.prepare("SELECT * FROM providers WHERE id = ?").bind(job.provider_id).first();
   const now = Date.now();
+  if (job.stalls > MAX_STALLS) {
+    const message = "Varias ejecuciones seguidas se cortaron sin poder guardar avance (probablemente el límite de CPU del plan gratuito con páginas muy grandes). Achicá la cantidad de títulos por página en la especificación y volvé a sincronizar: lo ya importado se conserva.";
+    await saveJob(env, job, JSON.parse(job.cursor_json), { status: "failed", locked_until: 0, finished_at: now, last_error: message });
+    await log(env, "error", "sync", `Trabajo ${job.id}: ${message}`, { providerId: job.provider_id, jobId: job.id });
+    return { ...job, status: "failed" };
+  }
   if (!provider || !provider.enabled || !ADAPTERS[provider.adapter]) {
     const why = !provider ? "el proveedor ya no existe" : !provider.enabled ? "el proveedor está desactivado" : "su adaptador ya no existe";
     await saveJob(env, job, JSON.parse(job.cursor_json), { status: "cancelled", locked_until: 0, finished_at: now, last_error: `Cancelado: ${why}.` });
@@ -89,12 +126,13 @@ export async function runJobStep(env, job, { fetchImpl = fetch, pages = Number(e
   let done = 0;
 
   try {
-    while (done < pages && Date.now() < deadline) {
+    while (done < pages && Date.now() < deadline && counter.n < DB_BUDGET) {
       if (cursor.phase === "items") {
         const kind = cursor.kinds?.[cursor.ki];
-        if (!kind) { cursor.phase = def.listEpisodes ? "episodes" : "finish"; cursor.cursor = null; continue; }
+        if (!kind) { cursor.phase = episodesOn(def, ctx.config) ? "episodes" : "finish"; cursor.cursor = null; continue; }
         const page = await def.listPage(ctx, { kind, cursor: cursor.cursor, since: j.since });
-        const raw = Array.isArray(page?.items) ? page.items.slice(0, LIMITS.maxItemsPerPage) : [];
+        // Se procesa la página completa (sin recortar): el tamaño lo decide la especificación.
+        const raw = Array.isArray(page?.items) ? page.items : [];
         const items = raw.map(r => normalizeTitle(r, kinds)).filter(Boolean);
         const c = await upsertTitles(env, provider.id, items, { touchSeen: j.mode === "full" });
         for (const note of c.conflictNotes.slice(0, 3)) await log(env, "warn", "duplicados", note, { providerId: provider.id, jobId: j.id });
@@ -123,7 +161,7 @@ export async function runJobStep(env, job, { fetchImpl = fetch, pages = Number(e
           done++;
           continue;
         }
-        const episodes = (page?.episodes || []).slice(0, LIMITS.maxItemsPerPage).map(normalizeEpisode).filter(Boolean);
+        const episodes = (page?.episodes || []).map(normalizeEpisode).filter(Boolean);
         const c = await upsertEpisodes(env, provider.id, source.title_id, episodes);
         j.pages++; j.episodes += c.saved; j.skipped += (page?.episodes?.length || 0) - episodes.length;
         if (page?.next) cursor.ep = { id: source.id, cursor: page.next };
@@ -210,7 +248,7 @@ export async function fetchEpisodesNow(env, sourceRow, { fetchImpl = fetch, maxP
   const provider = await env.DB.prepare("SELECT * FROM providers WHERE id = ? AND enabled = 1").bind(sourceRow.provider_id).first();
   if (!provider) return 0;
   const { def, ctx } = await contextFor(env, provider, { fetchImpl, budget: { left: maxPages + 2 } });
-  if (!def.listEpisodes) return 0;
+  if (!def.listEpisodes || !episodesOn(def, ctx.config)) return 0;
   const src = { externalId: sourceRow.external_id, data: JSON.parse(sourceRow.data_json || "{}") };
   let cursor = null, saved = 0;
   for (let i = 0; i < maxPages; i++) {

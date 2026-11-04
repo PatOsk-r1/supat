@@ -1,6 +1,6 @@
-# Catálogo central de Supat (API en Cloudflare Workers + D1)
+# Catálogo de Supat (API en Cloudflare Workers + D1)
 
-Servidor que guarda **un catálogo compartido por todos los usuarios**. El propietario incorpora proveedores de contenido desde el panel de Supat. El servidor importa sus títulos, los guarda sin duplicados y, al reproducir, resuelve la fuente.
+Servidor que guarda **un catálogo compartido por todos los usuarios**, importado de **una única fuente de contenido**. La fuente la configura el propietario en **Ajustes → Fuentes de contenido**. El servidor importa sus títulos, los guarda sin duplicados y, al reproducir, resuelve los enlaces.
 
 ```
 Supat (navegador) ──token de Firebase──▶ Worker (worker/src) ──▶ D1 (base SQLite)
@@ -9,7 +9,7 @@ Supat (navegador) ──token de Firebase──▶ Worker (worker/src) ──▶
 ```
 
 - **Cuentas:** las sigue manejando Firebase Auth, sin cambios. El Worker verifica la firma del token en cada pedido.
-- **Proveedores del navegador:** Internet Archive, listas M3U y Jellyfin siguen funcionando como antes, en Ajustes. El catálogo central se suma como un proveedor más ("Catálogo central de Supat").
+- **Una sola fuente:** la app usa solo el catálogo del servidor. No hay catálogos de ejemplo ni proveedores alternativos. Al guardar la fuente, cualquier otro proveedor que hubiera en la base se apaga: sus datos quedan guardados pero no se muestran.
 - **Todo gratuito:** usa el plan Free de Cloudflare (Workers, D1 y Cron Triggers). No hace falta tarjeta.
 
 ## Archivos
@@ -24,24 +24,34 @@ Supat (navegador) ──token de Firebase──▶ Worker (worker/src) ──▶
 | `src/catalog.js` | Guardar sin duplicados (TMDb/IMDb), episodios, listado, búsqueda y ficha. |
 | `src/sync.js` | Importación por tandas: reanudable, con reintentos y cron diario. |
 | `src/play.js` | Fuente de reproducción (prueba los proveedores en orden). |
-| `src/admin.js` | Rutas del propietario. |
-| `src/providers/` | Contrato de adaptadores, adaptador genérico HTTP/JSON e Internet Archive. |
+| `src/source.js` | La fuente única: configuración, prueba de las dos credenciales, sincronización y estado público. |
+| `src/admin.js` | Rutas del propietario: trabajos, registros, usuarios, infraestructura. |
+| `src/providers/` | Contrato de adaptadores y adaptador genérico HTTP/JSON. |
 
 ## Roles y permisos
 
 | Rol | Qué puede hacer |
 |---|---|
 | `user` | Ver el catálogo, buscar, abrir fichas y reproducir. Necesita el correo verificado y la cuenta sin suspender ni bloquear. |
-| `owner` | Todo lo anterior, más el panel: proveedores, sincronización, usuarios y permisos, registros e infraestructura. |
+| `owner` | Todo lo anterior, más **Ajustes → Fuentes de contenido** (configurar, probar, sincronizar) y el panel (sincronización, usuarios y permisos, registros e infraestructura). |
 
-- **Propietarios iniciales:** son los uid de Firebase que figuran en `OWNER_UIDS`, en `wrangler.toml`. No se pueden quitar desde el panel.
+- **Propietarios fijos:** los uid de Firebase de `OWNER_UIDS` (en `wrangler.toml`) y las cuentas que están en `admins/` de Firestore, que solo se editan desde la consola de Firebase. No se pueden quitar desde el panel.
 - **Asignación de roles:** un propietario puede hacer propietario a otro usuario, o bloquearlo. Nadie puede cambiar su propio rol. Un dato agregado al token (por ejemplo `role: "owner"`) se ignora.
 - **Validación:** cada ruta comprueba la sesión y el rol en el servidor (`index.js` → `authenticate` + `requireUser`/`requireOwner`). La única ruta pública es `GET /api/health`, que solo responde `{ ok: true }`.
 - **Suspensión:** la suspensión y el "cerrar todas las sesiones" del módulo de cuentas se respetan. El Worker lee el perfil de Firestore con el token del propio usuario, como mucho una vez cada 5 minutos. Las sesiones de más de 30 días se rechazan, igual que en `firestore.rules`.
 
 ## Seguridad de las credenciales
 
-- Las credenciales se cargan en el panel en campos de contraseña y viajan **una sola vez** al servidor.
+La fuente tiene **dos credenciales**, y cada una se usa solo para lo suyo:
+
+| Credencial | Para qué | Dónde va en la especificación |
+|---|---|---|
+| **API Key** (`apiKey`) | Consultas al catálogo: títulos, temporadas y episodios. | `auth` |
+| **Credencial de reproducción** (`playbackKey`) | Solo para pedir o habilitar los enlaces de reproducción (`resolve` / `resolveEpisode`). | `playbackAuth` |
+
+La especificación se rechaza si `{playbackKey}` aparece fuera de `playbackAuth`, o si `{apiKey}` aparece dentro. Así, la credencial de reproducción nunca viaja en las consultas del catálogo; las pruebas automáticas lo verifican.
+
+- Las credenciales se cargan en Ajustes en campos de contraseña y viajan **una sola vez** al servidor.
 - El servidor las guarda **cifradas** con AES-GCM. La clave de cifrado es `SECRETS_KEY`, un secreto del Worker que no está en el código.
 - **Nunca vuelven** al navegador. Las respuestas solo dicen qué campos están cargados (`secretsSet: ["apiKey"]`). Un campo vacío al guardar conserva la credencial; para borrarla hay que marcar "Borrar la guardada".
 - **Textos protegidos:** errores, registros y auditoría pasan por `redact()`, que tapa los valores secretos y sus versiones codificadas. La auditoría guarda el **nombre** del campo cambiado, nunca su valor.
@@ -54,10 +64,14 @@ Supat (navegador) ──token de Firebase──▶ Worker (worker/src) ──▶
 - **Por tandas:** un trabajo recorre el catálogo del proveedor página por página y guarda dónde quedó. Cada ejecución procesa `SYNC_PAGES_PER_RUN` páginas (3 por defecto) y se detiene.
 - **Cron:**
   - Todos los días a las 05:00 UTC arranca la sincronización **incremental** de cada proveedor activo con sincronización diaria.
-  - Cada 10 minutos sigue los trabajos pendientes. Si no hay ninguno, no hace nada.
-- **Desde el panel:** "Sincronizar ahora" o "Importación completa" procesan la primera tanda en el momento. "Continuar" procesa la siguiente.
+  - **Cada minuto** sigue los trabajos pendientes. Si no hay ninguno, no hace nada. Así un catálogo grande se recorre en horas, no en días.
+- **Al guardar la fuente** (con la prueba de conexión correcta) arranca la importación completa, si es nueva o si cambió la dirección, la especificación o las categorías.
+- **Desde Ajustes o el panel:** "Sincronizar cambios ahora" o "Importación completa" procesan la primera tanda en el momento. "Continuar" (en el panel) procesa la siguiente.
+- **Sin topes:** se recorren todas las páginas y se procesa cada página completa. El tamaño de página lo define la especificación. Cada ejecución se detiene antes de las 50 consultas a D1 y sigue en la próxima.
+- **Ejecuciones cortadas:** si varias ejecuciones seguidas se cortan sin guardar avance (por ejemplo, por el límite de 10 ms de CPU con páginas enormes), el trabajo queda "Falló" con la explicación. Lo importado se conserva; se arregla achicando la página en la especificación.
 - **Incremental:** si la especificación usa `{since}`, se piden solo los cambios desde la última sincronización completa (con 1 hora de margen). Si no, se recorre todo, pero lo que no cambió no se reescribe: se compara una huella del contenido.
-- **Completa:** además marca como "no disponible" lo que el proveedor dejó de ofrecer. **No borra nada:** el título se oculta y queda guardado.
+- **Completa:** además marca como "no disponible" lo que la fuente dejó de ofrecer. **No borra nada:** el título se oculta y queda guardado.
+- **Ante errores:** lo ya importado se sigue mostrando. Las bajas solo se marcan cuando una importación completa termina bien.
 - **Reintentos:** ante 429, errores 5xx o fallas de red, se reintenta a los 1, 2, 4 y 8 minutos. Al quinto intento fallido el trabajo queda "Falló". Los errores 4xx (credenciales, rutas) fallan enseguida, porque reintentar no los arregla.
 - **Episodios:** si una serie da error permanente al pedir sus episodios, se registra el aviso y se sigue con las demás. Si alguien abre una serie cuyos episodios todavía no se importaron, se piden en ese momento (unas pocas páginas).
 - **Un trabajo por proveedor:** pedir otra sincronización mientras hay una en curso devuelve la que ya existe.
@@ -77,19 +91,24 @@ Si no coincide ninguno, es un título nuevo.
 
 ## Adaptador genérico (HTTP/JSON): especificación
 
-Sirve para **cualquier API que responda JSON**, sin código nuevo. El propietario la carga en el panel: "Agregar proveedor" → "API HTTP genérica (JSON)".
+Sirve para **cualquier API que responda JSON**, sin código nuevo.
 
-**Campos del formulario:**
+En **Ajustes → Fuentes de contenido**, el propietario carga:
 
+- **Nombre** de la fuente.
 - **Dirección base**, por ejemplo `https://api.proveedor.com/v1`. Tiene que ser https; se permite http solo en `localhost`.
-- **Especificación (JSON)**: el formato está abajo.
-- **Credenciales opcionales:** `apiKey`, `token`, `username`, `password`.
+- **API Key** y **credencial de reproducción**.
+- **Categorías:** películas, series, anime y temporadas/episodios.
+- **Especificación de rutas (JSON)**, en "opciones avanzadas". Se arma con la **documentación técnica de la API**. El formato está abajo.
 
-**Un ejemplo con una API inventada.** Es el mismo proveedor simulado que usan las pruebas, en `tests/helpers/proveedor-simulado.js`:
+Con la especificación, el servidor construye cada ruta a partir de la dirección base. **Supat no inventa rutas ni formatos:** si la API no está descrita, la fuente no se puede activar.
+
+**Ejemplo con una API inventada.** Es el mismo proveedor simulado que usan las pruebas, en `tests/helpers/proveedor-simulado.js`:
 
 ```json
 {
   "auth": [{ "in": "header", "name": "X-Api-Key", "value": "{apiKey}" }],
+  "playbackAuth": [{ "in": "header", "name": "X-Play-Token", "value": "{playbackKey}" }],
   "minIntervalMs": 250,
   "catalog": {
     "movie": {
@@ -118,7 +137,8 @@ Sirve para **cualquier API que responda JSON**, sin código nuevo. El propietari
 
 | Clave | Qué es |
 |---|---|
-| `auth` | Lista. `{ "in": "header" \| "query", "name": "…", "value": "…{apiKey}…" }` o `{ "in": "basic" }` (usa `username` y `password`). **Las credenciales solo pueden ir acá**: si aparecen en `path` o `query`, la especificación se rechaza. |
+| `auth` | Autenticación de **todas** las consultas con la API Key. Lista de `{ "in": "header" \| "query", "name": "…", "value": "…{apiKey}…" }`. Con el adaptador también se puede usar `{ "in": "basic" }` (usuario y contraseña). |
+| `playbackAuth` | Autenticación que se agrega **solo** a `resolve` / `resolveEpisode`, con `{playbackKey}`. Lista de `{ "in": "header" \| "query" \| "body", "name": "…", "value": "…{playbackKey}…" }`. **Las credenciales solo pueden ir en `auth` y `playbackAuth`**: si aparecen en `path`, `query` o `body`, la especificación se rechaza. |
 | `headers` | Encabezados fijos que no son secretos. |
 | `minIntervalMs` | Pausa mínima entre consultas, para respetar los límites del proveedor. |
 | `catalog.<tipo>` | Una ruta por tipo: `movie`, `series`, `anime` o `live`. |
@@ -135,7 +155,14 @@ Sirve para **cualquier API que responda JSON**, sin código nuevo. El propietari
 | `embedOrigins` | Orígenes `https` permitidos para reproductores por iframe. |
 | `test` | Opcional: ruta para "Probar conexión". Si falta, se pide la primera página del catálogo. |
 
-Para un proveedor con una API que no encaja en este formato, se crea un adaptador propio en `src/providers/`, con el contrato de `contract.js`, y se suma en `registry.js`.
+"Probar conexión" prueba **las dos credenciales por separado**:
+
+1. Pide la primera página del catálogo con la API Key.
+2. Si hay `playbackAuth`, pide el enlace del primer título con la credencial de reproducción.
+
+Solo informa si funcionó y, si no, por qué. Nunca muestra direcciones ni credenciales.
+
+Para una API que no encaja en este formato, se crea un adaptador propio en `src/providers/`, con el contrato de `contract.js`, y se suma en `registry.js`.
 
 ## Probar en tu PC (sin cuenta de Cloudflare)
 
@@ -230,7 +257,7 @@ La app se publica solo en Firebase Hosting. Sin `VITE_SUPAT_API` la app funciona
 | Filas escritas por día | 100.000 (los índices también cuentan) | No se reescribe lo que no cambió. Un título nuevo escribe unas 8 filas, así que alcanza para unos 12.000 títulos nuevos por día. |
 | Filas leídas por día | 5.000.000 | La búsqueda usa el índice FTS5, no recorre la tabla. |
 | Tamaño de la base | 500 MB | — |
-| Cron Triggers | 5 por cuenta | Se usan 2. |
+| Cron Triggers | 5 por cuenta | Se usan 2 (diario y cada minuto). |
 | Pedidos por día | 100.000 | — |
 
 Si se pasa un límite diario, D1 responde con error hasta el día siguiente: **no genera cobros** en el plan gratuito.

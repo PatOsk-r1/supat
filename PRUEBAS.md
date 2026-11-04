@@ -102,6 +102,55 @@ Son las 47 anteriores más 28 nuevas, y corren sin red.
 - **Ver el video en este navegador:** el reproductor recibe la dirección correcta, pero el navegador integrado no carga videos de archive.org. Con el proveedor anterior pasa exactamente lo mismo.
 - **Proveedor externo real con credenciales:** no hay ninguno configurado. Se probó con un proveedor inventado.
 
+## 8. Fuente única de contenido (2026-11-03)
+
+### Pruebas automáticas: 83 de 83 pasan (sin red)
+
+`tests/api-catalogo.test.js` se reescribió para la fuente única. Cubre:
+
+- **Guardar la fuente:** prueba las dos credenciales, la activa y arranca la importación completa.
+- **Credenciales:**
+  - cifradas, nunca en respuestas, registros, auditoría, trabajos ni en la tabla de proveedores;
+  - si se dejan vacías se conservan, y "borrar" quita solo la elegida;
+  - la de reproducción no viaja en las consultas del catálogo, y sí en las de reproducción.
+- **Permisos:** solo el propietario configura, prueba o sincroniza.
+- **Prueba de conexión:** detecta una API Key equivocada y una credencial de reproducción equivocada, cada una por separado.
+- **Configuración que falla:** no activa la fuente ni importa nada.
+- **Fuente única:** guardarla apaga los otros proveedores sin borrar sus datos.
+- **Categorías.**
+- **Importación:**
+  - por tandas, reanudable y con menos de 50 consultas a D1 por tanda;
+  - una página de 450 títulos se importa completa, sin recortes;
+  - una ejecución cortada varias veces deja el trabajo fallido con explicación, y conserva lo importado;
+  - reintentos;
+  - un error de sincronización no oculta lo importado.
+- **Duplicados** dentro de la fuente, sincronización **incremental**, **bajas sin borrar**, **búsqueda** y **reproducción**.
+- **Especificación:** cada credencial en su lugar.
+- **Cron:** el diario y el de cada minuto.
+- **Guardar sin cambios** no vuelve a importar todo.
+
+`tests/logica.test.js` usa datos ficticios aislados en `tests/fixtures/catalogo-prueba.js`; ya no forman parte de la app.
+
+### Pruebas reales en local (workerd + D1 local + emuladores de Firebase)
+
+- **`node tests/e2e-api.mjs`, todo bien:** se probaron la fuente guardada desde Ajustes, con las dos credenciales, y que el usuario común no puede configurarla. También la importación completa con temporadas y episodios, el estado público, la búsqueda y la reproducción con la credencial de reproducción, y que los registros no tienen ninguna de las dos credenciales.
+- **Interfaz** (`npm run dev:emu`):
+  - **Usuario común:** ve solo lo importado de la fuente; las 40 películas anteriores de Internet Archive quedaron ocultas, no borradas. TV en vivo y Anime no aparecen en el menú porque no tienen contenido, y en Ajustes ve el estado sin formulario.
+  - **Sin sesión:** "Iniciá sesión para ver el catálogo".
+  - **Propietario:** formulario completo. Las credenciales no aparecen en la página ni en localStorage. "Probar conexión" funcionó, y "Guardar configuración" conservó las credenciales y mostró "Configuración guardada". El panel ya no tiene la pestaña Proveedores.
+
+### Hallazgos corregidos
+
+1. Guardar sin cambios volvía a importar todo, porque la especificación con otro formato contaba como cambio. Ahora se guarda normalizada.
+2. Al cerrar sesión, o al abrir la app sin sesión, el catálogo seguía visible desde la copia guardada. Ahora esa copia se borra (favoritos e historial no se tocan).
+3. Ajustes no mostraba el resultado de guardar.
+
+### No verificado
+
+- **Una API real:** no hay especificación ni credenciales de la fuente real. Todo se probó con una API inventada.
+- **La importación en Cloudflare con un catálogo grande**, en particular el límite de 10 ms de CPU con páginas grandes.
+- **El cron de cada minuto** con el programador real de Cloudflare.
+
 ## 6. No verificado
 
 - Pantalla completa: el navegador integrado de la app no la permite; el código maneja el rechazo. Falta probar en Chrome/Edge.

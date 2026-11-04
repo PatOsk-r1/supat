@@ -7,9 +7,10 @@ workers_dev = true
 
 # Cron Triggers (gratis, hasta 5 por cuenta):
 #  - 05:00 UTC todos los días: arranca la sincronización incremental de cada proveedor.
-#  - cada 10 minutos: sigue los trabajos pendientes en tandas chicas (si no hay, no hace nada).
+#  - cada minuto: sigue los trabajos pendientes en tandas chicas (si no hay, no hace nada).
+#    Una tanda por minuto recorre catálogos grandes en horas, no en días.
 [triggers]
-crons = ["0 5 * * *", "*/10 * * * *"]
+crons = ["0 5 * * *", "* * * * *"]
 
 [[d1_databases]]
 binding = "DB"

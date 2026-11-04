@@ -6,7 +6,7 @@
 //   title, categories[], year, description, poster, backdrop, logo, color, featured, rating,
 //   source: { url, type } | { lazy: true } | null      (lazy = el proveedor la busca al reproducir)
 //   seasons: [{ number, title, episodes: [{ id, number, title, description, still, duration, source }] }] | null
-//   lazySeasons (el proveedor las carga al abrir el detalle), tvgId, channelNumber, isDemo
+//   lazySeasons (el proveedor las carga al abrir el detalle), tvgId, channelNumber
 export const KINDS = {
   live: { label: "TV en vivo", mark: "EN VIVO" },
   movie: { label: "Película", mark: "PELÍCULA" },
@@ -107,8 +107,7 @@ export function normalizeItem(raw, instance, provider) {
     tvgId: text(raw.tvgId),
     channelNumber: Number(raw.channelNumber) || null,
     extra: raw.extra || null, // datos propios del proveedor (p. ej. id interno para pedir la fuente)
-    externalIds: normalizeExternalIds(raw.externalIds || raw),
-    isDemo: Boolean(provider.isDemo)
+    externalIds: normalizeExternalIds(raw.externalIds || raw)
   };
 }
 

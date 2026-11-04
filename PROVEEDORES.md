@@ -1,5 +1,11 @@
 # Cómo agregar un proveedor de contenido
 
+> **Estado actual:** Supat usa **una única fuente de contenido**: el catálogo del servidor, configurado en **Ajustes → Fuentes de contenido** (ver [worker/README.md](worker/README.md)). En la app solo está registrado el adaptador `central`.
+>
+> Los adaptadores del navegador que había antes (Internet Archive, M3U, Jellyfin) siguen en `src/providers/`, pero no están registrados. La demostración se quitó.
+>
+> Este documento explica el contrato del lado del navegador, que sigue usando el adaptador `central` y que prueban los tests. Para conectar una API nueva, lo que corresponde es la **especificación del adaptador genérico del servidor**, no un adaptador del navegador.
+
 La app no depende de ningún proveedor en particular. Cada proveedor es un **adaptador**: un archivo en `src/providers/` que cumple un contrato común (`src/providers/contract.js`). Fichas, catálogo, usuarios y reproductor solo hablan con el catálogo (`src/catalog/store.js`), nunca con un proveedor directamente.
 
 ```

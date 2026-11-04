@@ -9,7 +9,9 @@ const net = providerNet();
 
 createServer(async (req, res) => {
   const url = BASE + req.url.replace(/^\/v1/, "");
-  const out = await net(url, { headers: { "X-Api-Key": req.headers["x-api-key"] } });
+  const headers = { "X-Api-Key": req.headers["x-api-key"] };
+  if (req.headers["x-play-token"]) headers["X-Play-Token"] = req.headers["x-play-token"];
+  const out = await net(url, { headers });
   const body = (await out.text()).replaceAll("https://cdn.prov.ejemplo", `http://127.0.0.1:${PORT}/cdn`);
   res.writeHead(out.status, { "Content-Type": "application/json" });
   res.end(body);

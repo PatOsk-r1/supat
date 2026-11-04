@@ -4,7 +4,7 @@
 //   - proveedor inventado (node tests/helpers/servidor-proveedor.mjs)
 // Uso: node tests/e2e-api.mjs
 import assert from "node:assert/strict";
-import { SPEC, KEY } from "./helpers/proveedor-simulado.js";
+import { SPEC, KEY, PLAY_KEY } from "./helpers/proveedor-simulado.js";
 
 const AUTH = "http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1";
 const API = "http://127.0.0.1:8788";
@@ -46,23 +46,24 @@ assert.equal((await call("GET", "/api/admin/providers", user)).status, 403);
 assert.equal((await call("PATCH", "/api/admin/users/e2e-usuario", user, { role: "owner" })).status, 403);
 step("el usuario común no entra al panel ni se da permisos");
 
-const created = await call("POST", "/api/admin/providers", owner, { adapter: "http-json", label: "Proveedor de prueba local", config: { baseUrl: PROV, spec: JSON.stringify(SPEC), apiKey: KEY } });
-assert.equal(created.status, 200, JSON.stringify(created.body));
-const id = created.body.provider.id;
-assert.ok(!JSON.stringify(created.body).includes(KEY));
-assert.equal((await call("PATCH", `/api/admin/providers/${id}`, owner, { enabled: true })).status, 200);
-step("proveedor creado (credencial cifrada, no aparece en la respuesta) y activado");
+const saved = await call("PUT", "/api/admin/source", owner, { label: "Fuente de prueba local", baseUrl: PROV, spec: JSON.stringify(SPEC), apiKey: KEY, playbackKey: PLAY_KEY, categories: ["movie", "series", "anime", "episodes"] });
+assert.equal(saved.status, 200, JSON.stringify(saved.body));
+assert.ok(!JSON.stringify(saved.body).includes(KEY) && !JSON.stringify(saved.body).includes(PLAY_KEY));
+assert.equal(saved.body.test.ok, true, saved.body.test.message);
+step(`fuente guardada desde "Ajustes" (credenciales cifradas, no aparecen en la respuesta): ${saved.body.test.message}`);
+assert.equal((await call("PUT", "/api/admin/source", user, { label: "x" })).status, 403);
+step("el usuario común no puede configurar la fuente");
 
-const test = await call("POST", `/api/admin/providers/${id}/test`, owner);
-assert.equal(test.body.ok, true, test.body.message);
-step(`prueba de conexión: ${test.body.message}`);
+let job = saved.body.job;
+for (let i = 0; i < 30 && job && ["queued", "running"].includes(job.status); i++) job = (await call("POST", `/api/admin/jobs/${job.id}/continue`, owner)).body.job;
+if (job) {
+  assert.equal(job.status, "done", job.lastError);
+  step(`importación completa en D1 local: ${job.pages} páginas, ${job.created} títulos nuevos, ${job.merged} unidos, ${job.episodes} episodios`);
+} else step("la fuente ya estaba importada (sin cambios estructurales)");
+const status = (await call("GET", "/api/catalog/status", user)).body;
+assert.equal(status.available, true);
+step(`estado público: disponible, ${status.counts.movie} películas, ${status.counts.series} series, ${status.counts.episodes} episodios`);
 
-let job = (await call("POST", `/api/admin/providers/${id}/sync`, owner, { mode: "full" })).body.job;
-for (let i = 0; i < 20 && ["queued", "running"].includes(job.status); i++) job = (await call("POST", `/api/admin/jobs/${job.id}/continue`, owner)).body.job;
-assert.equal(job.status, "done", job.lastError);
-step(`importación completa en D1 local: ${job.pages} páginas, ${job.created} títulos nuevos, ${job.episodes} episodios`);
-
-// La base local puede tener títulos de corridas anteriores u otros proveedores: se buscan los de este.
 const movies = (await call("GET", "/api/catalog/titles?kind=movie&pageSize=200", user)).body.items;
 for (const t of ["La Película Uno", "Canción de Otoño", "Ñandú Veloz"]) assert.equal(movies.filter(m => m.title === t).length, 1, `${t} (sin duplicar)`);
 const found = (await call("GET", "/api/catalog/search?q=nandu", user)).body.items;
@@ -75,7 +76,7 @@ assert.equal(play.status, 200, JSON.stringify(play.body));
 assert.equal(play.body.type, "application/x-mpegurl");
 const m2 = movies.find(t => t.title === "Canción de Otoño");
 assert.equal((await call("GET", `/api/catalog/titles/${m2.id}/play`, user)).status, 502);
-step("reproducción resuelta en el servidor; la dirección con la clave no se entrega");
+step("reproducción resuelta en el servidor con la credencial de reproducción; el enlace que la contiene no se entrega");
 
 const series = (await call("GET", "/api/catalog/titles?kind=series", user)).body.items;
 const detail = (await call("GET", `/api/catalog/titles/${series.find(s => s.title === "Serie A").id}`, user)).body;
@@ -84,6 +85,6 @@ step("temporadas y episodios asociados");
 
 const logs = (await call("GET", "/api/admin/logs", owner)).body.logs;
 const audit = (await call("GET", "/api/admin/audit", owner)).body.audit;
-assert.ok(!JSON.stringify([logs, audit]).includes(KEY));
+assert.ok(!JSON.stringify([logs, audit]).includes(KEY) && !JSON.stringify([logs, audit]).includes(PLAY_KEY));
 step(`registros (${logs.length}) y auditoría (${audit.length}) sin la credencial`);
 console.log("\nTodo bien.");

@@ -3,7 +3,14 @@
 // "especificación" que carga el propietario. Formato completo en worker/README.md.
 import { ProviderError, pick, readJsonBody, KINDS, playbackType } from "./contract.js";
 
-const SECRET_KEYS = ["apiKey", "token", "username", "password"];
+// Credenciales de acceso a la API (catálogo, temporadas, episodios): solo en "auth".
+const API_SECRETS = ["apiKey", "token", "username", "password"];
+// Credencial de reproducción: solo en "playbackAuth", que se usa ÚNICAMENTE al pedir la fuente
+// (resolve / resolveEpisode). Nunca se manda en las consultas del catálogo.
+const PLAYBACK_SECRETS = ["playbackKey"];
+const SECRET_KEYS = [...API_SECRETS, ...PLAYBACK_SECRETS];
+// Categorías que se pueden importar (Ajustes → Fuentes de contenido).
+export const CATEGORIES = ["movie", "series", "anime", "episodes"];
 const PAGINATION = ["none", "page", "offset", "cursor", "link"];
 const MAX_PAGES = 100000;
 
@@ -15,6 +22,11 @@ function render(template, vars) {
   });
 }
 const placeholders = t => [...String(t).matchAll(/\{([a-zA-Z0-9_.]+)\}/g)].map(m => m[1]);
+
+export function categoriesOf(config) {
+  const list = String(config.categories ?? "").split(",").map(s => s.trim()).filter(c => CATEGORIES.includes(c));
+  return list.length ? list : [...CATEGORIES];
+}
 
 function parseSpec(config) {
   if (config.spec && typeof config.spec === "object") return config.spec;
@@ -29,7 +41,7 @@ function endpointProblems(ep, where) {
   if (ep.method && !["GET", "POST"].includes(ep.method)) p.push(`${where}: "method" solo puede ser GET o POST.`);
   const templates = [ep.path, ...Object.values(ep.query || {}), ...Object.values(ep.body || {})];
   for (const name of templates.flatMap(placeholders)) {
-    if (SECRET_KEYS.includes(name)) p.push(`${where}: las credenciales ({${name}}) solo pueden ir en "auth".`);
+    if (SECRET_KEYS.includes(name)) p.push(`${where}: las credenciales ({${name}}) solo pueden ir en "auth" o "playbackAuth".`);
   }
   if (ep.pagination && !PAGINATION.includes(ep.pagination.type)) p.push(`${where}: paginación desconocida (usar ${PAGINATION.join(", ")}).`);
   if (ep.pagination?.type === "cursor" && !ep.pagination.next) p.push(`${where}: la paginación por cursor necesita "next".`);
@@ -55,10 +67,20 @@ export function specProblems(spec) {
   }
   for (const key of ["resolve", "resolveEpisode", "test"]) if (spec[key]) p.push(...endpointProblems(spec[key], key));
   for (const key of ["resolve", "resolveEpisode"]) if (spec[key] && !spec[key].url) p.push(`${key}: falta "url" (ruta al campo con la dirección).`);
-  for (const a of [].concat(spec.auth || [])) {
-    if (!["header", "query", "basic"].includes(a?.in)) p.push('Cada entrada de "auth" necesita "in": header, query o basic.');
-    if (a?.in !== "basic" && (!a?.name || typeof a.value !== "string")) p.push('Las entradas "header" y "query" de "auth" necesitan "name" y "value".');
+  for (const [key, allowed, other] of [["auth", API_SECRETS, PLAYBACK_SECRETS], ["playbackAuth", PLAYBACK_SECRETS, API_SECRETS]]) {
+    for (const a of [].concat(spec[key] || [])) {
+      const kinds = key === "auth" ? ["header", "query", "basic"] : ["header", "query", "body"];
+      if (!kinds.includes(a?.in)) p.push(`Cada entrada de "${key}" necesita "in": ${kinds.join(", ")}.`);
+      if (a?.in !== "basic" && (!a?.name || typeof a.value !== "string")) p.push(`Las entradas de "${key}" necesitan "name" y "value".`);
+      for (const name of placeholders(a?.value || "")) {
+        if (other.includes(name)) p.push(key === "auth"
+          ? `"auth" no puede usar {${name}}: la credencial de reproducción va solo en "playbackAuth".`
+          : `"playbackAuth" no puede usar {${name}}: ahí solo va la credencial de reproducción ({playbackKey}).`);
+        else if (!allowed.includes(name)) p.push(`"${key}" usa {${name}}, que no es una credencial conocida.`);
+      }
+    }
   }
+  if (spec.playbackAuth && !spec.resolve && !spec.resolveEpisode) p.push('"playbackAuth" necesita "resolve" o "resolveEpisode" (es lo único que la usa).');
   for (const origin of [].concat(spec.embedOrigins || [])) {
     try { const u = new URL(origin); if (u.protocol !== "https:" || u.origin !== origin) throw new Error(); }
     catch { p.push(`Origen de reproductor externo inválido: ${origin} (usar "https://dominio").`); }
@@ -74,7 +96,7 @@ function base(config) {
 
 // Arma la consulta: dirección, encabezados y cuerpo, con la autenticación de la especificación.
 // `link`: ruta + consulta de la página siguiente que dio el propio proveedor (paginación "link").
-function buildRequest(ctx, spec, ep, vars, link = "") {
+function buildRequest(ctx, spec, ep, vars, link = "", { playback = false } = {}) {
   const root = base(ctx.config);
   const prefix = root.pathname.replace(/\/$/, "");
   const url = new URL(link ? root.origin + link : root.origin + prefix + render(ep.path, vars));
@@ -84,24 +106,31 @@ function buildRequest(ctx, spec, ep, vars, link = "") {
     if (value !== "" || !placeholders(t).length) url.searchParams.set(k, value);
   }
   const headers = { Accept: "application/json", ...(spec.headers || {}) };
-  for (const a of [].concat(spec.auth || [])) {
-    if (a.in === "basic") headers.Authorization = `Basic ${btoa(`${ctx.secrets.username || ""}:${ctx.secrets.password || ""}`)}`;
-    else {
-      const value = render(a.value, ctx.secrets);
+  const body = init => (init.method === "POST" && ep.body ? Object.fromEntries(Object.entries(ep.body).map(([k, t]) => [k, render(t, vars)])) : null);
+  const init = { method: ep.method || "GET", headers };
+  let json = body(init);
+  // Cada credencial solo llega a las consultas que le corresponden.
+  const only = keys => Object.fromEntries(keys.map(k => [k, ctx.secrets[k]]));
+  const apply = (entries, secrets) => {
+    for (const a of [].concat(entries || [])) {
+      if (a.in === "basic") { headers.Authorization = `Basic ${btoa(`${secrets.username || ""}:${secrets.password || ""}`)}`; continue; }
+      const value = render(a.value, secrets);
       if (a.in === "header") headers[a.name] = value;
+      else if (a.in === "body") { json = { ...(json || {}), [a.name]: value }; init.method = "POST"; }
       else url.searchParams.set(a.name, value);
     }
-  }
-  const init = { method: ep.method || "GET", headers };
-  if (init.method === "POST" && ep.body) {
-    init.body = JSON.stringify(Object.fromEntries(Object.entries(ep.body).map(([k, t]) => [k, render(t, vars)])));
+  };
+  apply(spec.auth, only(API_SECRETS));
+  if (playback) apply(spec.playbackAuth, only(PLAYBACK_SECRETS));
+  if (json) {
+    init.body = JSON.stringify(json);
     headers["Content-Type"] = "application/json";
   }
   return { url, init };
 }
 
-async function call(ctx, spec, ep, vars, link = "") {
-  const { url, init } = buildRequest(ctx, spec, ep, vars, link);
+async function call(ctx, spec, ep, vars, link = "", opts) {
+  const { url, init } = buildRequest(ctx, spec, ep, vars, link, opts);
   return readJsonBody(await ctx.fetch(url.toString(), init));
 }
 
@@ -175,7 +204,12 @@ export default {
   name: "API HTTP genérica (JSON)",
   description: "Cualquier API que responda JSON. Se describe con una especificación: rutas, paginación, autenticación y qué campo es cada dato.",
   kindsFor(config) {
-    try { return Object.keys(parseSpec(config).catalog || {}).filter(k => KINDS.includes(k)); } catch { return []; }
+    const enabled = categoriesOf(config);
+    try { return Object.keys(parseSpec(config).catalog || {}).filter(k => KINDS.includes(k) && (k === "live" || enabled.includes(k))); } catch { return []; }
+  },
+  // ¿Se importan temporadas y episodios? (la especificación los define y la categoría está activa)
+  episodesEnabled(config) {
+    try { return Boolean(parseSpec(config).episodes) && categoriesOf(config).includes("episodes"); } catch { return false; }
   },
   kinds: KINDS,
   fields: [
@@ -184,7 +218,9 @@ export default {
     { key: "apiKey", label: "Clave de API", type: "password", secret: true, help: "Se usa donde la especificación diga {apiKey}." },
     { key: "token", label: "Token", type: "password", secret: true, help: "Se usa donde la especificación diga {token}." },
     { key: "username", label: "Usuario", type: "password", secret: true, help: "Para autenticación básica o {username}." },
-    { key: "password", label: "Contraseña", type: "password", secret: true, help: "Para autenticación básica o {password}." }
+    { key: "password", label: "Contraseña", type: "password", secret: true, help: "Para autenticación básica o {password}." },
+    { key: "playbackKey", label: "Credencial de reproducción", type: "password", secret: true, help: "Solo para pedir los enlaces de reproducción ({playbackKey} en \"playbackAuth\")." },
+    { key: "categories", label: "Categorías", type: "text", help: "movie, series, anime y episodes, separadas por coma. Vacío = todas." }
   ],
   validate(config) {
     const p = [];
@@ -281,7 +317,7 @@ export default {
     const target = episode || source;
     const vars = { id: target.externalId, data: target.data || {}, seriesId: source?.externalId ?? "", season: episode?.season ?? "", number: episode?.number ?? "" };
     if (episode) vars.data = { ...(source?.data || {}), ...(episode.data || {}) };
-    const data = await call(ctx, spec, ep, vars);
+    const data = await call(ctx, spec, ep, vars, "", { playback: true });
     const url = pick(data, ep.url);
     if (!url) throw new ProviderError("El proveedor no devolvió una dirección de reproducción.");
     return { url: String(url), type: playbackType(ep.type ? pick(data, ep.type) ?? ep.typeValue : ep.typeValue ?? "") };

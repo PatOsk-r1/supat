@@ -1,20 +1,16 @@
 // Registro de proveedores.
-//  - "Tipos": las clases de proveedor que la app sabe usar (demo, Internet Archive, lista M3U, Jellyfin…).
-//  - "Instancias": los proveedores que el usuario tiene configurados. Puede haber varias del
-//    mismo tipo (por ejemplo, dos listas M3U), cada una con su propia configuración.
-// Las instancias se guardan en los ajustes del navegador.
+// Supat usa UNA sola fuente de contenido: el catálogo central del servidor, que el propietario
+// configura en Ajustes → Fuentes de contenido (ver worker/README.md). No hay catálogos de
+// ejemplo ni proveedores alternativos.
+//  - "Tipos": las clases de proveedor que la app sabe usar (hoy, solo "central").
+//  - "Instancias": cómo está configurado cada tipo en este navegador (activo o no).
+// El registro sigue siendo genérico (contrato en contract.js), y las pruebas lo usan con
+// adaptadores simulados.
 import { settings } from "../app/settings.js";
-import demo from "./demo.js";
-import archive from "./internet-archive.js";
-import m3u from "./m3u.js";
-import jellyfin from "./jellyfin.js";
 import central from "./central.js";
 
 import { validateProviderDef } from "./contract.js";
 
-// Tipos registrados. Para sumar uno: crear su adaptador en esta carpeta e incluirlo abajo
-// (ver PROVEEDORES.md). Un adaptador que no cumple el contrato se descarta con un aviso,
-// sin afectar a los demás.
 export const PROVIDER_TYPES = {};
 
 export function registerProviderType(def) {
@@ -31,19 +27,10 @@ export function unregisterProviderType(type) {
   delete PROVIDER_TYPES[type];
 }
 
-[demo, archive, m3u, jellyfin].forEach(registerProviderType);
-// El catálogo central solo aparece si esta versión tiene la dirección de la API (VITE_SUPAT_API).
+// El catálogo central solo existe si esta versión tiene la dirección de la API (VITE_SUPAT_API).
 if (central.available()) registerProviderType(central);
 
-// En la vista previa publicada (npm run page) el visor bloquea las conexiones externas,
-// así que ahí solo se activa la demostración.
-export const PREVIEW = import.meta.env?.MODE === "page";
-
-const DEFAULT_INSTANCES = [
-  { id: "central", type: "central", enabled: true },
-  { id: "archive", type: "archive", enabled: !PREVIEW },
-  { id: "demo", type: "demo", enabled: true }
-];
+const DEFAULT_INSTANCES = [{ id: "central", type: "central", enabled: true }];
 
 export function defaultInstances() {
   return DEFAULT_INSTANCES.filter(i => PROVIDER_TYPES[i.type]).map(i => complete(i));
@@ -60,16 +47,13 @@ function complete(instance) {
   };
 }
 
+// Proveedores guardados de versiones anteriores (Internet Archive, listas M3U, Jellyfin, demo)
+// se ignoran: sus tipos ya no están registrados. La fuente central siempre está activa.
 export function getInstances() {
   const saved = settings.get("providers");
-  let list = Array.isArray(saved) ? saved : defaultInstances();
-  // Quien ya tenía proveedores guardados recibe el catálogo central una vez (si lo quita, no vuelve).
-  if (Array.isArray(saved) && PROVIDER_TYPES.central && !settings.get("centralOffered") && !list.some(i => i.type === "central")) {
-    list = [{ id: "central", type: "central", enabled: true }, ...list];
-    settings.set("centralOffered", true);
-    save(list.filter(i => PROVIDER_TYPES[i.type]).map(complete));
-  }
-  return list.filter(i => PROVIDER_TYPES[i.type]).map(complete);
+  const list = (Array.isArray(saved) ? saved : defaultInstances()).filter(i => PROVIDER_TYPES[i.type]);
+  if (PROVIDER_TYPES.central && !list.some(i => i.type === "central")) list.unshift(DEFAULT_INSTANCES[0]);
+  return list.map(complete).map(i => (i.type === "central" ? { ...i, enabled: true } : i));
 }
 
 export function getInstance(id) {
@@ -82,7 +66,6 @@ export function providerOf(instanceOrId) {
 }
 
 function save(list) {
-  if (list.some(i => i.type === "central") && !settings.get("centralOffered")) settings.set("centralOffered", true);
   settings.set("providers", list.map(({ id, type, label, enabled, config }) => ({ id, type, label, enabled, config })));
 }
 

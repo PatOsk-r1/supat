@@ -8,7 +8,7 @@ import { createFavorites } from "../app/favorites.js";
 import { cacheClear, cacheSet } from "../app/cache.js";
 import { catalog } from "../catalog/store.js";
 import * as enrich from "../catalog/enrich.js";
-import { addInstance, updateInstance, removeInstance, getInstance, validateConfig, PREVIEW } from "../providers/registry.js";
+import { getInstance } from "../providers/registry.js";
 import * as home from "./views/home.js";
 import * as browse from "./views/browse.js";
 import * as live from "./views/live.js";
@@ -35,7 +35,7 @@ export function startApp(app, extensions = {}) {
   const guestProgress = { save() {}, flush() {}, get: () => null, resumeTime: () => 0, isFinished: () => false, recent: () => [], all: () => [], remove: async () => {}, clear: async () => {} };
   const state = { route: parseRoute(location.hash), query: "", filters: defaultFilters(), season: 0, confirm: null, restartRequested: false, tmdbStatus: "", formError: "", formMessage: "", busy: false,
     central: { tab: null, data: {}, loading: false, error: "", editing: null, newAdapter: "", testResult: null, logLevel: "" },
-    remote: null };
+    remote: null, source: null };
   const ctx = {
     catalog, settings, state, account, userdata, admin, ...extensions,
     get favorites() { return userdata.active ? userdata.favorites : guestFavorites; },
@@ -63,7 +63,6 @@ export function startApp(app, extensions = {}) {
       <a class="account-link" id="account-link" href="#/cuenta">Ingresar</a>
     </header>
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-    ${PREVIEW ? `<p class="preview-banner" role="note">Vista previa publicada: acá solo funciona el contenido de demostración, porque el visor bloquea las conexiones externas. Para películas reales y TV, abrí la app en tu PC (ver README).</p>` : ""}
     <main id="view" tabindex="-1"></main>
     <footer>SUPAT <span>Información e imágenes de TMDb</span></footer>
   </div>`;
@@ -95,7 +94,12 @@ export function startApp(app, extensions = {}) {
     cleanup();
     cleanup = () => {};
 
+    // Las secciones de un tipo sin títulos importados no se muestran (no hay contenido de relleno).
+    const kinds = new Set(catalog.all().map(x => x.kind));
+    const loadedOnce = !catalog.loading || kinds.size;
     app.querySelectorAll("[data-nav]").forEach(a => {
+      const section = SECTIONS.find(s => s.id === a.dataset.nav);
+      a.hidden = Boolean(section?.kind && loadedOnce && kinds.size && !kinds.has(section.kind) && state.route.name !== section.id);
       const current = a.dataset.nav === state.route.name && !state.query;
       a.classList.toggle("active", current);
       current ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current");
@@ -117,7 +121,6 @@ export function startApp(app, extensions = {}) {
 
   // ---------- catálogo central: datos del panel del propietario ----------
   const centralLoaders = {
-    adapters: () => centralAdmin.adapters(),
     providers: () => centralAdmin.providers(),
     jobs: () => centralAdmin.jobs(),
     users: () => centralAdmin.users(),
@@ -144,6 +147,21 @@ export function startApp(app, extensions = {}) {
     }
   };
   const reloadCentral = () => ctx.loadCentral(state.central.tab, { force: true });
+
+  // Configuración de la fuente de contenido (solo propietario; nunca trae credenciales).
+  ctx.loadSource = async ({ quiet = false } = {}) => {
+    const prev = state.source;
+    if (prev?.loading) return;
+    state.source = { ...prev, loading: true };
+    if (!quiet) render();
+    try {
+      const { source } = await centralAdmin.source();
+      state.source = { ...state.source, data: source, loading: false, error: "" };
+    } catch (err) {
+      state.source = { ...state.source, loading: false, error: err?.message || "No se pudo cargar la configuración de la fuente." };
+    }
+    if (state.route.name === "ajustes" && !state.busy) render();
+  };
 
   // Redibuja como mucho una vez por cuadro. En la pantalla de reproducción no se redibuja
   // por cambios de catálogo, para no cortar el video.
@@ -230,22 +248,6 @@ export function startApp(app, extensions = {}) {
       state.liveSelected = el.dataset.id;
       render();
     },
-    "provider-refresh": async el => { await catalog.load({ only: el.dataset.id }); render(); },
-    "provider-remove": el => {
-      const key = `remove:${el.dataset.id}`;
-      if (state.confirm !== key) { state.confirm = key; render(); return; }
-      state.confirm = null;
-      catalog.clearCache(el.dataset.id);
-      removeInstance(el.dataset.id);
-      catalog.load().then(render);
-    },
-    "provider-add": () => {
-      const type = app.querySelector("#add-type")?.value;
-      if (!type) return;
-      const instance = addInstance(type);
-      render();
-      view.querySelector(`[data-form="provider"][data-id="${CSS.escape(instance.id)}"] input:not([type=hidden])`)?.focus();
-    },
     "data-clear": el => {
       const what = el.dataset.what;
       if (state.confirm !== what) { state.confirm = what; render(); return; }
@@ -294,33 +296,21 @@ export function startApp(app, extensions = {}) {
 
     // ---------- catálogo central (propietario) ----------
     "admin-tab": el => { state.adminTab = el.dataset.tab; state.formError = ""; state.formMessage = ""; state.central.editing = null; render(); },
-    "central-new": () => {
-      state.central.newAdapter = app.querySelector("#cadd-type")?.value || "";
-      state.central.editing = "nuevo";
-      state.central.testResult = null;
-      render();
-      view.querySelector('[data-form="central-provider"] input')?.focus();
-    },
-    "central-edit": el => { state.central.editing = el.dataset.id || null; state.central.testResult = null; render(); },
-    "central-toggle": el => run(async () => {
-      await centralAdmin.updateProvider(el.dataset.id, { enabled: el.dataset.enabled === "true" });
-      await reloadCentral();
-    }, { ok: el.dataset.enabled === "true" ? "Proveedor activado." : "Proveedor desactivado: sus títulos dejan de mostrarse (no se borran)." }),
-    "central-sync": el => {
-      const go = () => run(async () => {
-        const { job, existing } = await centralAdmin.sync(el.dataset.id, el.dataset.mode);
-        state.formMessage = existing ? `Ya había un trabajo en curso (#${job.id}).` : `Trabajo #${job.id}: ${job.status === "done" ? "terminado" : job.status === "failed" ? `falló (${job.lastError})` : `primera tanda lista (${job.pages} páginas, ${job.created} nuevos). Sigue solo cada 10 minutos o con "Continuar" en Sincronización.`}`;
-        await reloadCentral();
-      });
-      if (el.dataset.mode === "full") confirmThen(`cfull:${el.dataset.id}`, go); else go();
-    },
-    "central-test": el => {
+    // ---------- fuente de contenido (Ajustes, propietario) ----------
+    "source-test": el => {
       const form = el.closest("form");
-      const config = form ? centralFormConfig(form).config : null;
       run(async () => {
-        const result = await centralAdmin.testProvider(el.dataset.id, config);
-        state.central.testResult = { id: el.dataset.id, ...result };
+        const result = await centralAdmin.testSource(sourceFormBody(form, { forTest: true }));
+        state.source = { ...state.source, test: { ...result, at: Date.now() } };
       });
+    },
+    "source-sync": el => {
+      const go = () => run(async () => {
+        const { job, existing } = await centralAdmin.syncSource(el.dataset.mode);
+        state.formMessage = existing ? `Ya había una importación en curso (#${job.id}).` : `Importación #${job.id}: ${job.status === "done" ? "terminada" : job.status === "failed" ? `falló (${job.lastError})` : "en curso; sigue sola cada minuto."}`;
+        await ctx.loadSource({ quiet: true });
+      });
+      if (el.dataset.mode === "full") confirmThen("source-full", go); else go();
     },
     "central-continue": el => run(async () => {
       const { job } = await centralAdmin.continueJob(el.dataset.id);
@@ -338,15 +328,13 @@ export function startApp(app, extensions = {}) {
     "remote-more": () => remoteSearch(state.remote?.q, (state.remote?.page || 1) + 1)
   };
 
-  // Formulario de proveedor del catálogo central → { label, schedule, priority, config, clearSecrets }.
-  function centralFormConfig(form) {
+  // Formulario de la fuente → cuerpo para la API. Las credenciales vacías no se mandan (se conservan).
+  function sourceFormBody(form, { forTest = false } = {}) {
     const data = Object.fromEntries(new FormData(form).entries());
-    const config = {}, clearSecrets = [];
-    for (const [k, v] of Object.entries(data)) {
-      if (k.startsWith("__clear_")) clearSecrets.push(k.slice(8));
-      else if (!k.startsWith("__")) config[k] = v;
-    }
-    return { label: data.__label, schedule: data.__schedule, priority: Number(data.__priority), config, clearSecrets };
+    const body = { label: data.label || "", baseUrl: data.baseUrl || "", spec: data.spec || "", categories: ["movie", "series", "anime", "episodes"].filter(k => data[`cat_${k}`]) };
+    for (const k of ["apiKey", "playbackKey"]) if (data[k]) body[k] = data[k];
+    if (!forTest) body.clearSecrets = ["apiKey", "playbackKey"].filter(k => data[`__clear_${k}`]);
+    return body;
   }
 
   // Ejecuta una operación de cuenta mostrando "ocupado", y después el mensaje o el error.
@@ -371,7 +359,7 @@ export function startApp(app, extensions = {}) {
     state.confirm = null;
     fn();
   }
-  const CONFIRM_ACTIONS = ["provider-remove", "data-clear", "logout-all", "list-delete", "history-clear", "admin-suspend", "admin-delete-list", "central-sync", "central-cancel", "central-role", "central-block"];
+  const CONFIRM_ACTIONS = ["provider-remove", "data-clear", "logout-all", "list-delete", "history-clear", "admin-suspend", "admin-delete-list", "source-sync", "central-cancel", "central-role", "central-block"];
 
   app.addEventListener("click", ev => {
     const el = ev.target.closest("[data-action]");
@@ -387,45 +375,24 @@ export function startApp(app, extensions = {}) {
     if (el.dataset.action === "central-log-level") { state.central.logLevel = el.value; delete state.central.data.logs; ctx.loadCentral("registros"); return; }
     if (el.dataset.action === "filter-select") { state.filters[el.dataset.name] = el.value; state.filters.limit = 0; render(); return; }
     if (el.dataset.setting) { settings.set(el.dataset.setting, el.type === "checkbox" ? el.checked : el.value); return; }
-    if (el.dataset.action === "provider-toggle") {
-      updateInstance(el.dataset.id, { enabled: el.checked });
-      render();
-      await catalog.load();
-      render();
-      return;
-    }
-    if (el.dataset.action === "provider-file" && el.files?.[0]) {
-      const file = el.files[0];
-      const content = await file.text();
-      await cacheSet(`archivo:${el.dataset.id}`, content);
-      updateInstance(el.dataset.id, { config: { [el.dataset.field]: `${file.name} (${Math.round(file.size / 1024)} kB, ${new Date().toLocaleDateString("es")})` } });
-      await catalog.load({ only: el.dataset.id });
-      render();
-    }
   });
 
   app.addEventListener("submit", async ev => {
     const form = ev.target;
     ev.preventDefault();
     const data = Object.fromEntries(new FormData(form).entries());
-    if (form.dataset.form === "provider") {
-      const id = form.dataset.id;
-      const { __label, ...config } = data;
-      const current = getInstance(id);
-      const updated = updateInstance(id, { label: __label?.trim() || current.label, config });
-      if (!validateConfig(updated).length && !updated.enabled) updateInstance(id, { enabled: true });
-      render();
-      await catalog.load({ only: id });
-      render();
-    } else if (form.dataset.form === "central-provider") {
-      const { label, schedule, priority, config, clearSecrets } = centralFormConfig(form);
-      const id = form.dataset.id;
+    if (form.dataset.form === "source") {
       run(async () => {
-        if (id) await centralAdmin.updateProvider(id, { label, schedule, priority, config, clearSecrets });
-        else await centralAdmin.createProvider({ adapter: form.dataset.adapter, label, schedule, priority, config });
-        state.central.editing = null;
-        await reloadCentral();
-      }, { ok: id ? "Cambios guardados." : "Proveedor creado (desactivado). Probá la conexión y activalo." });
+        const result = await centralAdmin.saveSource(sourceFormBody(form));
+        state.source = { data: result.source, test: { ...result.test, at: Date.now() } };
+        if (result.test.ok) {
+          state.formMessage = result.job ? `Configuración guardada. Importación #${result.job.id} ${result.job.status === "done" ? "terminada" : "en curso: sigue sola cada minuto"}.` : "Configuración guardada.";
+          catalog.forgetThrottle("central");
+          catalog.load({ only: "central", force: true }).then(render);
+        } else {
+          state.formError = "Se guardó, pero la prueba de conexión falló: la fuente no se activó. Revisá el detalle en el estado de conexión.";
+        }
+      });
     } else if (form.dataset.form === "tmdb") {
       settings.set("tmdbKey", (data.tmdbKey || "").trim());
       settings.set("language", data.language);
@@ -500,9 +467,12 @@ export function startApp(app, extensions = {}) {
     updateAccountLink();
     queueRender();
     const key = account.ready ? `${account.user?.uid || ""}:${account.verified}` : null;
-    if (key !== null && sessionKey !== null && key !== sessionKey && getInstance("central")?.enabled) {
+    const changed = sessionKey === null ? !account.signedIn : key !== sessionKey; // al abrir sin sesión, o al cambiar
+    if (key !== null && changed && getInstance("central")?.enabled) {
       catalog.forgetThrottle("central");
-      catalog.load({ only: "central", force: true }).then(render);
+      // Sin sesión no se muestra la copia guardada del catálogo (no toca favoritos ni historial).
+      const clear = account.signedIn ? Promise.resolve() : catalog.clearCache("central");
+      clear.then(() => catalog.load({ only: "central", force: true })).then(render);
     }
     if (key !== null) sessionKey = key;
   });
@@ -591,6 +561,7 @@ export function startApp(app, extensions = {}) {
     if (state.route.name !== previous.name || state.route.id !== previous.id || state.route.mode !== previous.mode) {
       state.formError = ""; state.formMessage = "";
       if (state.route.name !== "cuenta") state.authReason = "";
+      if (state.route.name === "ajustes") state.source = null; // configuración fresca al entrar
       if (state.route.name === "admin") { state.admin = null; state.central.data = {}; state.central.editing = null; } // datos frescos al entrar
       state.listItems = {}; // las listas se vuelven a leer al entrar (pueden haber cambiado)
     }

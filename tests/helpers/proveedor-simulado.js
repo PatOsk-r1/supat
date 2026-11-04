@@ -4,9 +4,11 @@ import { fakeNet } from "./api.js";
 
 export const BASE = "https://api.prov.ejemplo/v1";
 export const KEY = "clave-super-secreta-123";
+export const PLAY_KEY = "credencial-de-reproduccion-456";
 
 export const SPEC = {
   auth: [{ in: "header", name: "X-Api-Key", value: "{apiKey}" }],
+  playbackAuth: [{ in: "header", name: "X-Play-Token", value: "{playbackKey}" }],
   catalog: {
     movie: {
       path: "/movies", query: { page: "{page}", changed_since: "{since}" }, items: "results",
@@ -41,8 +43,12 @@ export function movies(page) {
 
 // Estado del "servidor" simulado; las pruebas lo cambian para simular fallas.
 export function providerNet(state = {}) {
-  const s = { failMovies: 0, pages: {}, ...state };
-  const auth = init => (init.headers?.["X-Api-Key"] === KEY ? null : { __status: 401, body: { error: "bad key" } });
+  const s = { failMovies: 0, pages: {}, playKeyLeaks: 0, ...state };
+  // La credencial de reproducción NO debe llegar a las consultas del catálogo.
+  const auth = init => {
+    if (init.headers?.["X-Play-Token"]) s.playKeyLeaks++;
+    return init.headers?.["X-Api-Key"] === KEY ? null : { __status: 401, body: { error: "bad key" } };
+  };
   const net = fakeNet({
     [`${BASE}/movies`]: (u, init) => {
       if (auth(init)) return auth(init);
@@ -63,9 +69,10 @@ export function providerNet(state = {}) {
       return { data: [{ id: "s2", name: "Serie B", slug: "serie-b", tmdb_id: 502 }], meta: { next: null } };
     },
     [`${BASE}/play/`]: (u, init) => {
-      if (auth(init)) return auth(init);
+      if (init.headers?.["X-Api-Key"] !== KEY) return { __status: 401, body: { error: "bad key" } };
+      if (init.headers?.["X-Play-Token"] !== PLAY_KEY) return { __status: 403, body: { error: "playback not authorized" } };
       const id = u.pathname.split("/").pop();
-      if (id === "m2") return { stream: { url: `https://cdn.prov.ejemplo/m2.mp4?key=${KEY}`, type: "mp4" } }; // filtra la clave: no se entrega
+      if (id === "m2") return { stream: { url: `https://cdn.prov.ejemplo/m2.mp4?token=${PLAY_KEY}`, type: "mp4" } }; // filtra la credencial: no se entrega
       if (id === "m3") return { stream: { url: "https://otro.ejemplo/embed/m3", type: "embed" } };      // iframe de un origen no declarado
       return { stream: { url: `https://cdn.prov.ejemplo/${id}.m3u8`, type: "hls" } };
     }

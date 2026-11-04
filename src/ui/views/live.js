@@ -30,7 +30,7 @@ function previewInfo(item, ctx) {
   const { now, next } = ctx.catalog.nowNext(item);
   const upcoming = ctx.catalog.schedule(item).filter(p => p.stop > Date.now()).slice(0, 6);
   return `<div class="preview-info">
-    <div class="preview-head"><div><span class="eyebrow">CANAL ${item.channelNumber || ""}${item.isDemo ? " · DEMO" : ""}</span><h2>${e(item.title)}</h2></div>
+    <div class="preview-head"><div><span class="eyebrow">CANAL ${item.channelNumber || ""}</span><h2>${e(item.title)}</h2></div>
       <a class="secondary" href="${hrefFor.watch(item)}">⛶ Pantalla completa</a></div>
     <div class="hero-meta">${e(item.categories.join(" · "))} ${providerBadge(item)}</div>
     ${now ? `<p class="now"><strong>Ahora:</strong> ${e(now.title)} <small>${time(now.start)}–${time(now.stop)}</small></p>${now.description ? `<p class="note">${e(now.description)}</p>` : ""}` : ""}
@@ -84,7 +84,7 @@ export function render(ctx, section) {
       ctx.catalog.resolveSource(selected).then(source => {
         if (!alive) return;
         if (!source) {
-          playerMessage(box, "Este canal no tiene una fuente de video", selected.isDemo ? "Es un canal de demostración: no transmite." : "El proveedor no informó una dirección para este canal.");
+          playerMessage(box, "Este canal no tiene una fuente de video", "La fuente de contenido no informó una dirección para este canal.");
           return;
         }
         player = createPlayer(box, { source, title: selected.title, subtitle: "En vivo", live: true, preference: ctx.settings.get("player") });

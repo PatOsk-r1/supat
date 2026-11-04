@@ -82,7 +82,7 @@ export function render(ctx, route) {
     <div class="detail-main">
       <div class="detail-poster poster ${e(item.color)}">${poster ? `<img src="${e(poster)}" alt="Póster de ${e(item.title)}">` : `<span class="poster-title">${e(item.title)}</span>`}</div>
       <div class="detail-info">
-        <span class="eyebrow">${KINDS[item.kind].label.toUpperCase()}${item.isDemo ? " · DEMOSTRACIÓN" : ""}</span>
+        <span class="eyebrow">${KINDS[item.kind].label.toUpperCase()}</span>
         <h1 tabindex="-1">${e(item.title)}</h1>
         ${info.originalTitle && info.originalTitle !== item.title ? `<p class="original-title">${e(info.originalTitle)}</p>` : ""}
         <div class="hero-meta">${[item.year || info.year, info.runtime ? `${info.runtime} min` : "", rating ? `★ ${Number(rating).toFixed(1)}` : "", info.seasonCount ? `${info.seasonCount} temporada(s)` : ""].filter(Boolean).map(e).join("<span>•</span>")} ${providerBadge(item)}</div>

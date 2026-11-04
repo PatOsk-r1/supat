@@ -2,7 +2,7 @@
 import { escapeHtml as e } from "../../app/util.js";
 import { hrefFor } from "../../app/router.js";
 import { KINDS, hasEpisodes } from "../../catalog/model.js";
-import { cardFor, continueCard, favButton, row, empty, providerBadge } from "../components.js";
+import { cardFor, continueCard, favButton, row, catalogEmpty, providerBadge } from "../components.js";
 
 const ROW_SIZE = 18;
 
@@ -20,7 +20,7 @@ function hero(list, ctx) {
   const slides = list.map((item, i) => `<article class="hero-slide ${i === 0 ? "active" : ""}" data-slide="${i}" ${i ? 'aria-hidden="true"' : ""}>
       <div class="hero-art ${e(item.color)}" aria-hidden="true">${item.backdrop || item.poster ? `<img src="${e(item.backdrop || item.poster)}" alt="" ${i ? 'loading="lazy"' : ""}>` : `<div class="hero-x">S</div>`}</div>
       <div class="hero-content">
-        <span class="eyebrow">DESTACADO · ${KINDS[item.kind].label.toUpperCase()}${item.isDemo ? " · DEMO" : ""}</span>
+        <span class="eyebrow">DESTACADO · ${KINDS[item.kind].label.toUpperCase()}</span>
         <h${i === 0 ? "1 tabindex=\"-1\"" : "2"} class="hero-title">${e(item.title)}</h${i === 0 ? 1 : 2}>
         <div class="hero-meta">${[item.year, item.categories.slice(0, 2).join(" · "), item.rating ? `★ ${item.rating.toFixed(1)}` : ""].filter(Boolean).map(e).join("<span>•</span>")} ${providerBadge(item)}</div>
         <p>${e(item.description || "Sin descripción disponible.")}</p>
@@ -39,7 +39,7 @@ function hero(list, ctx) {
 export function render(ctx) {
   const items = ctx.catalog.all();
   if (!items.length) {
-    return { title: "Inicio", html: `<h1 class="sr-only" tabindex="-1">Inicio</h1>` + empty("Todavía no hay contenido.", "Activá o configurá un proveedor para ver títulos acá.", `<a class="primary" href="#/ajustes">Ir a Ajustes</a>`) };
+    return { title: "Inicio", html: `<h1 class="sr-only" tabindex="-1">Inicio</h1>` + catalogEmpty(ctx) };
   }
   const cards = list => list.slice(0, ROW_SIZE).map(x => cardFor(x, ctx)).join("");
 

@@ -34,8 +34,8 @@ async function ensureSession() {
 
 export default {
   type: "central",
-  name: "Catálogo central de Supat",
-  description: "Películas, series, anime y canales que el propietario incorpora al servidor, compartidos con todos los usuarios. Necesita iniciar sesión.",
+  name: "Catálogo de Supat",
+  description: "Películas, series y anime de la fuente de contenido que configura el propietario, compartidos con todos los usuarios. Necesita iniciar sesión.",
   origin: "Servidor de Supat",
   kinds: ["movie", "series", "anime", "live"],
   multiple: false,
@@ -46,6 +46,14 @@ export default {
 
   async load(config, { signal }) {
     await ensureSession();
+    // Estado claro cuando no hay catálogo (sin datos de relleno).
+    const status = await api.get("/api/catalog/status", { signal });
+    if (!status.configured) throw new ApiError("El catálogo no está disponible: todavía no se configuró la fuente de contenido.", 0, "unconfigured");
+    if (!status.available) {
+      throw new ApiError(status.importing ? "El catálogo se está importando. Volvé en unos minutos."
+        : !status.enabled ? "El catálogo no está disponible: la fuente de contenido no pasó la prueba de conexión."
+          : "El catálogo no está disponible por el momento.", 0, status.importing ? "importing" : "unavailable");
+    }
     const items = [];
     for (const kind of this.kinds) {
       for (let page = 1; page <= MAX_PAGES_PER_KIND; page++) {
@@ -54,7 +62,7 @@ export default {
         if (!res.hasMore) break;
       }
     }
-    return { items };
+    return { items, warning: status.failing ? "La última sincronización tuvo problemas; se muestra lo importado hasta entonces." : "" };
   },
 
   async loadSeasons(item, config, { signal }) {

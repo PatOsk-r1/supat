@@ -69,7 +69,6 @@ main { flex: 1; padding: 24px var(--gutter) 40px; min-width: 0; }
 .note { color: var(--muted); font-size: 13px; line-height: 1.55; }
 .warning { background: #ffb34714; border: 1px solid #ffb34744; color: #ffd8a0; padding: 10px 14px; border-radius: 10px; font-size: 13px; }
 .badge { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .5px; padding: 3px 8px; border-radius: 6px; background: #ffffff14; color: #ddd8e8; vertical-align: middle; white-space: nowrap; }
-.badge-demo { background: #ffc56b22; color: var(--warn); }
 
 /* Carrusel de destacados */
 .hero { position: relative; min-height: clamp(320px, 42vw, 470px); border-radius: 22px; overflow: hidden; background: #1a1626; isolation: isolate; }

@@ -7,7 +7,7 @@ import { getFirebase } from "./firebase.js";
 // En "npm run dev:emu" usa la API local de "npm run api:dev". Vacía = catálogo central apagado.
 const MODE = import.meta.env?.MODE;
 export const API_BASE = String(import.meta.env?.VITE_SUPAT_API || (MODE === "emulador" ? "http://127.0.0.1:8788" : "")).replace(/\/$/, "");
-export const apiAvailable = () => Boolean(API_BASE) && MODE !== "page";
+export const apiAvailable = () => Boolean(API_BASE);
 
 export class ApiError extends Error {
   constructor(message, status = 0, code = "") {

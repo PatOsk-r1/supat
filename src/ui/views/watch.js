@@ -17,7 +17,7 @@ export function render(ctx, route) {
     html: `<article class="watch">
       <div class="player" id="player"><div class="player-message" role="status"><div class="xp-spinner"></div><small>Preparando…</small></div></div>
       <div class="watch-info">
-        <div><span class="eyebrow">${KINDS[item.kind].label.toUpperCase()}${item.isDemo ? " · DEMOSTRACIÓN" : ""}</span>
+        <div><span class="eyebrow">${KINDS[item.kind].label.toUpperCase()}</span>
           <h1 tabindex="-1" id="watch-title">${e(item.title)}</h1>
           <div class="hero-meta"><span id="watch-sub">${[item.year, item.categories[0]].filter(Boolean).map(e).join(" · ")}</span> ${providerBadge(item)}</div>
           <p id="watch-desc">${e(item.description || "")}</p></div>
@@ -65,8 +65,7 @@ function mountWatch(view, ctx, item, route, backHref) {
     }
     if (!alive) return;
     if (!source) {
-      playerMessage(box, "Este elemento no tiene una fuente de video",
-        item.isDemo ? "Es contenido de demostración: no hay transmisión real asociada." : "El proveedor no informó una dirección de video para este título.");
+      playerMessage(box, "Este elemento no tiene una fuente de video", "La fuente de contenido no informó una dirección de video para este título.");
       return;
     }
 

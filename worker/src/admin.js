@@ -3,10 +3,10 @@
 // con los NOMBRES de los campos cambiados, nunca sus valores secretos.
 import { fail, readJson, intParam } from "./http.js";
 import { ADAPTERS, describeAdapters, splitConfig, kindsOf } from "./providers/registry.js";
-import { secretFields, ProviderError, guardedFetch, LIMITS } from "./providers/contract.js";
-import { encryptSecrets, decryptSecrets, redact } from "./secrets.js";
-import { audit, auditStatement, log } from "./log.js";
-import { createJob, runPending, cancelJob, activeJob } from "./sync.js";
+import { secretFields, LIMITS } from "./providers/contract.js";
+import { decryptSecrets } from "./secrets.js";
+import { audit, auditStatement } from "./log.js";
+import { runPending, cancelJob, activeJob } from "./sync.js";
 import { stats } from "./catalog.js";
 import { isFixedOwner } from "./auth.js";
 
@@ -39,23 +39,8 @@ export function jobOut(j) {
   };
 }
 
-async function getProvider(env, id) {
-  const row = await env.DB.prepare("SELECT * FROM providers WHERE id = ?").bind(id).first();
-  if (!row) fail(404, "No existe ese proveedor.");
-  return row;
-}
-
-function validateCommon(body) {
-  const out = {};
-  if ("label" in body) { out.label = clip(body.label, 60); if (!out.label) fail(400, "Escribí un nombre para el proveedor."); }
-  if ("schedule" in body) { if (!["daily", "manual"].includes(body.schedule)) fail(400, "La sincronización debe ser \"daily\" o \"manual\"."); out.schedule = body.schedule; }
-  if ("priority" in body) { const p = parseInt(body.priority, 10); if (!(p >= 0 && p <= 1000)) fail(400, "La prioridad debe ser un número de 0 a 1000."); out.priority = p; }
-  if ("enabled" in body) out.enabled = body.enabled ? 1 : 0;
-  return out;
-}
-
 // Junta configuración guardada + cambios. Las credenciales vacías conservan las guardadas.
-async function mergeConfig(env, def, row, input = {}, clear = []) {
+export async function mergeConfig(env, def, row, input = {}, clear = []) {
   const { config, secrets } = splitConfig(def, input);
   const savedConfig = row ? JSON.parse(row.config_json || "{}") : {};
   const savedSecrets = row ? await decryptSecrets(env, row.secrets_enc) : {};
@@ -77,88 +62,6 @@ export const adminRoutes = {
   "GET /api/admin/providers": async ({ env }) => {
     const { results } = await env.DB.prepare("SELECT * FROM providers ORDER BY priority, created_at").all();
     return { providers: await Promise.all(results.map(r => providerOut(env, r))) };
-  },
-
-  "POST /api/admin/providers": async ({ env, request, user }) => {
-    const body = await readJson(request);
-    const def = ADAPTERS[body.adapter];
-    if (!def) fail(400, "Elegí un adaptador válido.");
-    const common = validateCommon({ label: body.label || def.name, schedule: body.schedule || "daily", priority: body.priority ?? 100 });
-    const { config, secrets, problems, changed } = await mergeConfig(env, def, null, body.config || {});
-    if (problems.length) fail(400, problems.join(" "), "config");
-    const id = `${def.id}-${crypto.randomUUID().slice(0, 8)}`;
-    const now = Date.now();
-    await env.DB.batch([
-      env.DB.prepare("INSERT INTO providers (id, adapter, label, enabled, schedule, config_json, secrets_enc, priority, created_at, updated_at) VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?)")
-        .bind(id, def.id, common.label, common.schedule, JSON.stringify(config), await encryptSecrets(env, secrets), common.priority, now, now),
-      auditStatement(env, user.uid, "provider-create", id, `Adaptador ${def.id}. Campos: ${changed.join(", ") || "ninguno"}`)
-    ]);
-    return { provider: await providerOut(env, await getProvider(env, id)) };
-  },
-
-  "PATCH /api/admin/providers/:id": async ({ env, request, user, params }) => {
-    const row = await getProvider(env, params.id);
-    const def = ADAPTERS[row.adapter];
-    if (!def) fail(409, "El adaptador de este proveedor ya no existe en el servidor.");
-    const body = await readJson(request);
-    const common = validateCommon(body);
-    const touchConfig = body.config || body.clearSecrets;
-    const merged = touchConfig ? await mergeConfig(env, def, row, body.config || {}, body.clearSecrets) : null;
-    if (merged?.problems.length) fail(400, merged.problems.join(" "), "config");
-    if (common.enabled && !merged) {
-      const check = await mergeConfig(env, def, row, {});
-      if (check.problems.length) fail(400, `No se puede activar: ${check.problems.join(" ")}`, "config");
-    }
-    const sets = [], binds = [], changed = [];
-    for (const [k, v] of Object.entries(common)) { sets.push(`${k} = ?`); binds.push(v); changed.push(k === "enabled" ? (v ? "activado" : "desactivado") : k); }
-    if (merged) {
-      sets.push("config_json = ?", "secrets_enc = ?");
-      binds.push(JSON.stringify(merged.config), await encryptSecrets(env, merged.secrets));
-      changed.push(...merged.changed);
-    }
-    if (!sets.length) return { provider: await providerOut(env, row) };
-    sets.push("updated_at = ?"); binds.push(Date.now());
-    await env.DB.batch([
-      env.DB.prepare(`UPDATE providers SET ${sets.join(", ")} WHERE id = ?`).bind(...binds, row.id),
-      auditStatement(env, user.uid, "provider-update", row.id, changed.join(", ").slice(0, 500))
-    ]);
-    return { provider: await providerOut(env, await getProvider(env, row.id)) };
-  },
-
-  // Prueba de conexión. Con "config" en el cuerpo prueba esos valores (sin guardarlos),
-  // completando las credenciales vacías con las ya guardadas.
-  "POST /api/admin/providers/:id/test": async ({ env, request, user, params, fetchImpl }) => {
-    const row = await getProvider(env, params.id);
-    const def = ADAPTERS[row.adapter];
-    if (!def) fail(409, "El adaptador de este proveedor ya no existe en el servidor.");
-    const body = await readJson(request);
-    const { config, secrets, problems } = await mergeConfig(env, def, row, body.config || {});
-    if (problems.length) return { ok: false, message: problems.join(" ") };
-    const ctx = { config, secrets, providerId: row.id, fetch: guardedFetch({ secrets, fetchImpl, budget: { left: 5 } }) };
-    const started = Date.now();
-    try {
-      const result = await def.test(ctx);
-      await audit(env, user.uid, "provider-test", row.id, `Correcta (${Date.now() - started} ms)`);
-      return { ok: true, message: redact(result.message, secrets), sample: (result.sample || []).map(s => redact(s, secrets)), ms: Date.now() - started };
-    } catch (err) {
-      const message = redact(err instanceof ProviderError ? err.message : `Error: ${err?.message || "desconocido"}`, secrets);
-      await log(env, "warn", "test", message, { providerId: row.id, secrets });
-      await audit(env, user.uid, "provider-test", row.id, `Falló: ${message}`);
-      return { ok: false, message, ms: Date.now() - started };
-    }
-  },
-
-  "POST /api/admin/providers/:id/sync": async ({ env, request, user, params, fetchImpl }) => {
-    const row = await getProvider(env, params.id);
-    if (!row.enabled) fail(409, "Activá el proveedor antes de sincronizarlo.");
-    const body = await readJson(request);
-    const mode = body.mode === "full" ? "full" : "incremental";
-    const { job, existing } = await createJob(env, row, { mode, trigger: "manual", actor: user.uid });
-    if (!existing) await audit(env, user.uid, mode === "full" ? "sync-full" : "sync-incremental", row.id, `Trabajo ${job.id}`);
-    // Primera tanda ya mismo, para ver resultados sin esperar al cron.
-    const [step] = await runPending(env, { fetchImpl, jobId: job.id });
-    const fresh = await env.DB.prepare("SELECT * FROM sync_jobs WHERE id = ?").bind(job.id).first();
-    return { job: jobOut(fresh), existing, ran: Boolean(step) };
   },
 
   "GET /api/admin/jobs": async ({ env, url }) => {

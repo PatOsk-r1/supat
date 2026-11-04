@@ -1,5 +1,5 @@
 // Películas y Series: grilla con filtros por categoría, proveedor y orden.
-import { cardFor, chips, select, grid, heading, empty } from "../components.js";
+import { cardFor, chips, select, grid, heading, empty, catalogEmpty } from "../components.js";
 
 const SORTS = [["destacados", "Destacados"], ["recientes", "Más recientes"], ["antiguos", "Más antiguos"], ["titulo", "Título A-Z"], ["puntaje", "Mejor puntuados"]];
 const MAX_CHIPS = 10;
@@ -45,7 +45,7 @@ export function render(ctx, section) {
 
   const emptyHtml = all.length
     ? empty("No hay títulos con estos filtros.", "Probá con otra categoría o proveedor.")
-    : empty(`Todavía no hay ${section.label.toLowerCase()}.`, "Activá o configurá un proveedor en Ajustes.", `<a class="primary" href="#/ajustes">Ir a Ajustes</a>`);
+    : catalogEmpty(ctx, section.label.toLowerCase());
 
   return {
     title: section.label,

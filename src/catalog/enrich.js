@@ -1,6 +1,5 @@
 // Completa los títulos del catálogo con información de TMDb, sin pisar lo que ya trae
-// el proveedor. Los títulos de demostración no se completan: son inventados y TMDb
-// podría devolver datos de una obra real con el mismo nombre.
+// el proveedor.
 import { settings } from "../app/settings.js";
 import { lookup, seasonEpisodes, testKey } from "./tmdb.js";
 
@@ -12,7 +11,7 @@ let backgroundDone = 0;
 
 const options = () => ({ key: settings.get("tmdbKey"), language: settings.get("language"), region: settings.get("region") });
 export const enabled = () => Boolean(settings.get("tmdbKey"));
-const eligible = item => item && !item.isDemo && ["movie", "series", "anime"].includes(item.kind);
+const eligible = item => item && ["movie", "series", "anime"].includes(item.kind);
 
 function apply(item, data) {
   if (!data) return;

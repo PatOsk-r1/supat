@@ -1,65 +1,100 @@
-// Ajustes: proveedores (activar, configurar, actualizar, quitar), TMDb, reproducción y datos guardados.
+// Ajustes: fuente de contenido, TMDb, reproducción y datos guardados.
 import { escapeHtml as e } from "../../app/util.js";
-import { PROVIDER_TYPES, getInstances } from "../../providers/registry.js";
 import { heading } from "../components.js";
-import { KINDS } from "../../catalog/model.js";
-import { capabilitiesOf, CAPABILITY_LABELS, secretKeys } from "../../providers/contract.js";
+import { getInstance } from "../../providers/registry.js";
 
-const STATE_TEXT = { ok: "Funcionando", loading: "Cargando…", error: "Con problemas", disabled: "Desactivado" };
+const CATEGORY_LABELS = [["movie", "Películas"], ["series", "Series"], ["anime", "Anime"], ["episodes", "Temporadas y episodios"]];
+const JOB_PHASE = { items: "títulos", episodes: "temporadas y episodios", finish: "cerrando" };
+const JOB_END = { done: "terminada", failed: "falló", cancelled: "cancelada" };
 
 function dateText(ts) {
   return ts ? new Date(ts).toLocaleString("es", { dateStyle: "short", timeStyle: "short" }) : "nunca";
 }
 
-function field(instance, f) {
-  const id = `f-${instance.id}-${f.key}`;
-  const value = instance.config[f.key] ?? "";
-  const help = f.help ? `<small id="${id}-help">${e(f.help)}</small>` : "";
-  const described = f.help ? `aria-describedby="${id}-help"` : "";
-  let control;
-  if (f.type === "textarea") control = `<textarea id="${id}" name="${e(f.key)}" rows="4" placeholder="${e(f.placeholder || "")}" ${described}>${e(value)}</textarea>`;
-  else if (f.type === "select") control = `<select id="${id}" name="${e(f.key)}" ${described}>${f.options.map(([v, t]) => `<option value="${e(v)}" ${String(value) === v ? "selected" : ""}>${e(t)}</option>`).join("")}</select>`;
-  else if (f.type === "file") control = `<input id="${id}" type="file" accept="${e(f.accept || "")}" data-action="provider-file" data-id="${e(instance.id)}" data-field="${e(f.key)}" ${described}>
-    ${value ? `<span class="note">Archivo cargado: ${e(value)}</span>` : ""}`;
-  else control = `<input id="${id}" name="${e(f.key)}" type="${f.type === "password" ? "password" : f.type === "number" ? "number" : f.type === "url" ? "url" : "text"}"
-    value="${e(value)}" placeholder="${e(f.placeholder || "")}" autocomplete="off" spellcheck="false" ${described}>`;
-  return `<div class="field"><label for="${id}">${e(f.label)}${f.required ? " *" : ""}</label>${control}${help}</div>`;
+// Estado del catálogo que ve cualquier usuario (lo que cargó el navegador).
+function catalogState(ctx) {
+  if (!getInstance("central")) return `<p class="note">Esta versión de Supat no tiene configurado el servidor del catálogo.</p>`;
+  const st = ctx.catalog.status("central");
+  if (st.state === "loading") return `<div class="provider-status" role="status"><strong>Cargando el catálogo…</strong></div>`;
+  if (st.state === "ok") return `<div class="provider-status status-ok" role="status"><strong>Catálogo disponible</strong> · ${st.count} títulos · actualizado ${dateText(st.updatedAt)}${st.fromCache ? " (copia guardada)" : ""}
+    ${st.warning ? `<span class="provider-error">${e(st.warning)}</span>` : ""}</div>`;
+  return `<div class="provider-status status-error" role="status"><strong>Catálogo no disponible</strong>
+    <span class="provider-error">${e(st.error || "No se pudo cargar el catálogo.")}</span></div>`;
 }
 
-function providerCard(instance, ctx) {
-  const def = PROVIDER_TYPES[instance.type];
-  const st = ctx.catalog.status(instance.id);
-  const state = instance.enabled ? st.state : "disabled";
-  const confirmRemove = ctx.state.confirm === `remove:${instance.id}`;
-  return `<article class="provider ${instance.enabled ? "" : "is-off"}">
-    <header class="provider-head">
-      <div>
-        <h3>${e(instance.label)} ${def.isDemo ? `<span class="badge badge-demo">DEMO</span>` : ""}</h3>
-        <p>${e(def.description)}</p>
-        <p class="provider-origin">Origen: ${e(def.origin)}${def.license ? ` · ${e(def.license)}` : ""}</p>
-        <div class="genres provider-caps">${def.kinds.map(k => `<span class="genre">${e(KINDS[k].label)}</span>`).join("")}${capabilitiesOf(def).map(c => `<span class="genre cap">${e(CAPABILITY_LABELS[c])}</span>`).join("")}</div>
-      </div>
-      <label class="switch"><input type="checkbox" data-action="provider-toggle" data-id="${e(instance.id)}" data-key="toggle:${e(instance.id)}" ${instance.enabled ? "checked" : ""}>
-        <span>${instance.enabled ? "Activo" : "Inactivo"}</span></label>
-    </header>
-    <div class="provider-status status-${state}" role="status">
-      <strong>${STATE_TEXT[state]}</strong>
-      ${instance.enabled ? ` · ${st.count || 0} títulos · actualizado ${dateText(st.updatedAt)}${st.fromCache ? " (copia guardada)" : ""}` : ""}
-      ${instance.enabled && st.error ? `<span class="provider-error">${e(st.error)}</span>` : ""}
-      ${instance.enabled && st.warning ? `<span class="provider-error">${e(st.warning)}</span>` : ""}
+function importState(src) {
+  const job = src.activeJob, last = src.lastJob, c = src.counts || {};
+  let line;
+  if (job) {
+    line = `en curso (trabajo #${job.id}, ${job.mode === "full" ? "completa" : "cambios"}): ${e(JOB_PHASE[job.phase] || job.phase)} · ${job.pages} páginas · ${job.seen} recibidos · ${job.created} nuevos · ${job.updated} actualizados · ${job.episodes} episodios`
+      + (job.attempts ? ` · reintento ${job.attempts} a las ${dateText(job.nextRunAt)}` : "")
+      + (job.lastError ? `<span class="provider-error">${e(job.lastError)}</span>` : "");
+  } else if (last) {
+    line = `${JOB_END[last.status] || last.status} el ${dateText(last.finishedAt)}` + (last.lastError ? `<span class="provider-error">${e(last.lastError)}</span>` : "");
+  } else {
+    line = "todavía no se hizo";
+  }
+  return `<div class="provider-status ${src.lastStatus === "error" ? "status-error" : ""}" role="status" aria-live="polite">
+    <strong>Importación:</strong> ${line}
+    <span>En el catálogo: ${c.movie || 0} películas · ${c.series || 0} series · ${c.anime || 0} anime · ${c.episodes || 0} episodios. Última sincronización completa: ${dateText(src.lastSyncAt)}.</span>
+  </div>`;
+}
+
+// Formulario del propietario. Las credenciales guardadas nunca llegan acá: solo se sabe si están cargadas.
+function sourceForm(ctx) {
+  const st = ctx.state.source;
+  if (!st || (st.loading && !st.data)) return `<div class="empty" role="status"><div class="xp-spinner"></div>Cargando la configuración…</div>`;
+  if (st.error && !st.data) return `<p class="form-error" role="alert">${e(st.error)}</p>`;
+  const src = st.data;
+  const set = key => (src.secretsSet || []).includes(key);
+  const secret = (key, label, help) => `<div class="field"><label for="src-${key}">${label}</label>
+    <input id="src-${key}" name="${key}" type="password" autocomplete="new-password" spellcheck="false" placeholder="${set(key) ? "Guardada · dejá vacío para conservarla" : ""}" aria-describedby="src-${key}-help">
+    ${set(key) ? `<label class="check"><input type="checkbox" name="__clear_${key}"> Borrar la guardada</label>` : ""}
+    <small id="src-${key}-help">${help}</small></div>`;
+  let spec = src.spec || "";
+  try { if (spec) spec = JSON.stringify(JSON.parse(spec), null, 2); } catch { /* se muestra tal cual */ }
+  const test = st.test || (src.lastTest ? { ok: src.lastTest.ok, message: src.lastTest.message, at: src.lastTest.at } : null);
+  const confirmFull = ctx.state.confirm === "source-full";
+  const busy = ctx.state.busy ? "disabled" : "";
+  return `<form class="provider-form" data-form="source">
+    <div class="field"><label for="src-label">Nombre de la fuente *</label><input id="src-label" name="label" value="${e(src.label || "")}" maxlength="60" required></div>
+    <div class="field"><label for="src-base">Dirección base de la API *</label><input id="src-base" name="baseUrl" type="url" value="${e(src.baseUrl || "")}" placeholder="https://api.ejemplo.com/v1" spellcheck="false" aria-describedby="src-base-help">
+      <small id="src-base-help">El servidor arma cada ruta a partir de esta dirección, según la especificación del adaptador.</small></div>
+    ${secret("apiKey", "API Key", "Autentica las consultas al catálogo (títulos, temporadas, episodios). Solo se usa para eso.")}
+    ${secret("playbackKey", "Credencial de autorización de reproducción", "Se usa únicamente para pedir o habilitar los enlaces de reproducción. Nunca se manda en las consultas del catálogo.")}
+    <fieldset class="field"><legend>Categorías a importar</legend>
+      ${CATEGORY_LABELS.map(([k, label]) => `<label class="check"><input type="checkbox" name="cat_${k}" ${(src.categories || []).includes(k) ? "checked" : ""}> ${label}</label>`).join("")}
+    </fieldset>
+    <details class="field" ${src.configured ? "" : "open"}><summary>Especificación de rutas del adaptador (JSON) *</summary>
+      <textarea id="src-spec" name="spec" rows="14" spellcheck="false" class="code" aria-describedby="src-spec-help">${e(spec)}</textarea>
+      <small id="src-spec-help">Rutas, paginación, campos y dónde va cada credencial ("auth" para la API Key, "playbackAuth" para la de reproducción). Formato en worker/README.md; se arma con la documentación técnica de la API.</small></details>
+    <div class="provider-status ${test ? (test.ok ? "status-ok" : "status-error") : ""}" role="status">
+      <strong>Estado de conexión:</strong> ${test ? `${test.ok ? "✔ Correcta" : "✖ Con problemas"}${test.at ? ` (${dateText(test.at)})` : ""}` : src.configured ? "sin probar" : "sin configurar"}
+      ${test?.message ? `<span class="${test.ok ? "" : "provider-error"}">${e(test.message)}</span>` : ""}
     </div>
-    ${def.fields.length ? `<form class="provider-form" data-form="provider" data-id="${e(instance.id)}">
-      <div class="field"><label for="f-${e(instance.id)}-label">Nombre</label><input id="f-${e(instance.id)}-label" name="__label" value="${e(instance.label)}"></div>
-      ${def.fields.map(f => field(instance, f)).join("")}
-      ${def.notice ? `<p class="note">${e(def.notice)}</p>` : ""}
-      ${secretKeys(def).length ? `<p class="note">Las claves se guardan solo en este navegador y nunca se muestran en los mensajes de error. Cuando la app tenga servidor, pasarán a guardarse ahí.</p>` : ""}
-      <div class="form-actions"><button type="submit" class="primary">Guardar</button></div>
-    </form>` : ""}
-    <div class="provider-actions">
-      ${instance.enabled && def.ttl ? `<button type="button" class="secondary" data-action="provider-refresh" data-id="${e(instance.id)}" data-key="refresh:${e(instance.id)}">Actualizar ahora</button>` : ""}
-      ${def.multiple || !def.isDemo ? `<button type="button" class="danger ${confirmRemove ? "confirming" : ""}" data-action="provider-remove" data-id="${e(instance.id)}" data-key="remove:${e(instance.id)}">${confirmRemove ? "¿Quitar? Tocá de nuevo" : "Quitar"}</button>` : ""}
+    <div class="form-actions">
+      <button type="button" class="secondary" data-action="source-test" data-key="source-test" ${busy}>Probar conexión</button>
+      <button type="submit" class="primary" ${busy}>Guardar configuración</button>
     </div>
-  </article>`;
+    <p class="note">Al guardar se prueba la conexión. Si funciona, esta pasa a ser la única fuente activa y arranca la importación completa. Las credenciales se guardan cifradas en el servidor y nunca vuelven al navegador.</p>
+  </form>
+  ${src.configured ? importState(src) : ""}
+  ${src.enabled ? `<div class="provider-actions">
+    <button type="button" class="secondary" data-action="source-sync" data-mode="incremental" data-key="source-sync" ${busy}>Sincronizar cambios ahora</button>
+    <button type="button" class="danger ${confirmFull ? "confirming" : ""}" data-action="source-sync" data-mode="full" data-key="source-full" ${busy}>${confirmFull ? "¿Importar todo de nuevo? Tocá otra vez" : "Importación completa"}</button>
+    <a class="secondary" href="#/admin">Ver trabajos y registros</a>
+  </div>` : ""}`;
+}
+
+function sourceSection(ctx) {
+  return `<section class="settings-block" aria-labelledby="h-fuentes">
+      <h2 id="h-fuentes">Fuentes de contenido</h2>
+      ${catalogState(ctx)}
+      ${ctx.account.isOwner && ctx.state.formError ? `<p class="form-error" role="alert">${e(ctx.state.formError)}</p>` : ""}
+      ${ctx.account.isOwner && ctx.state.formMessage ? `<p class="note ok" role="status">${e(ctx.state.formMessage)}</p>` : ""}
+      ${ctx.account.isOwner && ctx.state.busy ? `<p class="note" role="status">Procesando…</p>` : ""}
+      ${ctx.account.isOwner ? sourceForm(ctx) : `<p class="note">El catálogo lo administra el propietario de Supat y es el mismo para todos los usuarios.</p>`}
+    </section>`;
 }
 
 function confirmButton(ctx, action, label) {
@@ -69,22 +104,11 @@ function confirmButton(ctx, action, label) {
 
 export function render(ctx) {
   const s = ctx.settings.all();
-  const instances = getInstances();
-  const addable = Object.values(PROVIDER_TYPES).filter(d => d.multiple || !instances.some(i => i.type === d.type));
   const tmdbStatus = ctx.state.tmdbStatus || "";
 
   const html = `<div class="section-heading">${heading("CONFIGURACIÓN", "Ajustes")}</div>
   <div class="settings">
-    <section class="settings-block" aria-labelledby="h-prov">
-      <h2 id="h-prov">Proveedores de contenido</h2>
-      <p class="note">Cada proveedor es una fuente de títulos.</p>
-      ${instances.map(i => providerCard(i, ctx)).join("") || `<p class="note">No hay proveedores configurados.</p>`}
-      ${addable.length ? `<div class="add-provider">
-        <label for="add-type">Agregar proveedor</label>
-        <select id="add-type">${addable.map(d => `<option value="${e(d.type)}">${e(d.name)}</option>`).join("")}</select>
-        <button type="button" class="secondary" data-action="provider-add" data-key="provider-add">Agregar</button>
-      </div>` : ""}
-    </section>
+    ${sourceSection(ctx)}
 
     <section class="settings-block" aria-labelledby="h-tmdb">
       <h2 id="h-tmdb">Imágenes e información (TMDb)</h2>
@@ -127,5 +151,15 @@ export function render(ctx) {
       </div>
     </section>
   </div>`;
-  return { title: "Ajustes", html };
+  return {
+    title: "Ajustes",
+    html,
+    // El propietario ve su configuración; mientras hay una importación en curso, el avance se actualiza solo.
+    mount() {
+      if (!ctx.account.isOwner) return () => {};
+      if (!ctx.state.source) ctx.loadSource?.();
+      const timer = setInterval(() => { if (ctx.state.source?.data?.activeJob && !document.hidden) ctx.loadSource?.({ quiet: true }); }, 15000);
+      return () => clearInterval(timer);
+    }
+  };
 }
