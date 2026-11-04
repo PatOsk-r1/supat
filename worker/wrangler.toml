@@ -20,7 +20,7 @@ migrations_dir = "migrations"
 [vars]
 FIREBASE_PROJECT_ID = "supat-h8tfw"
 # Sitios que pueden usar la API (separados por coma).
-ALLOWED_ORIGINS = "https://supat-h8tfw.web.app,https://supat-h8tfw.firebaseapp.com,https://patosk-r1.github.io"
+ALLOWED_ORIGINS = "https://supat-h8tfw.web.app,https://supat-h8tfw.firebaseapp.com"
 # uid de Firebase de los dueños iniciales (separados por coma). No es un secreto: identifica, no autentica.
 OWNER_UIDS = ""
 # Tandas: páginas por ejecución y títulos máximos por página que se procesan.

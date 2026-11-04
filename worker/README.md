@@ -218,7 +218,7 @@ Estos pasos crean recursos en **tu** cuenta, así que los tenés que autorizar v
 
 7. Creá `.env.production` con `VITE_SUPAT_API=https://supat-api.<tu-subdominio>.workers.dev`. Después recompilá y publicá la app (`npm run build` y `firebase deploy --only hosting`).
 
-Para GitHub Pages hay que agregar esa variable al paso de `npm run build` del workflow. Sin `VITE_SUPAT_API` la app funciona como antes, sin catálogo central.
+La app se publica solo en Firebase Hosting. Sin `VITE_SUPAT_API` la app funciona como antes, sin catálogo central.
 
 ## Límites del plan gratuito (consultados el 2026-11-03 en developers.cloudflare.com)
 
