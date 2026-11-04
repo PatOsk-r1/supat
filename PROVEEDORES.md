@@ -1,6 +1,6 @@
 # Cómo agregar un proveedor de contenido
 
-> **Estado actual:** Supat usa **una única fuente de contenido**: el catálogo del servidor, configurado en **Ajustes → Fuentes de contenido** (ver [worker/README.md](worker/README.md)). En la app solo está registrado el adaptador `central`.
+> **Estado actual:** Supat usa el catálogo del servidor, armado con **Fuente A y Fuente B**, que se configuran en **Ajustes → Fuentes de contenido** (ver [worker/FUENTES.md](worker/FUENTES.md)). En la app solo está registrado el adaptador `central`.
 >
 > Los adaptadores del navegador que había antes (Internet Archive, M3U, Jellyfin) siguen en `src/providers/`, pero no están registrados. La demostración se quitó.
 >

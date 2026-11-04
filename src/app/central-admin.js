@@ -15,9 +15,10 @@ export const centralAdmin = {
   users: () => api.get("/api/admin/users").then(r => r.users),
   updateUser: (uid, body) => api.patch(`/api/admin/users/${encodeURIComponent(uid)}`, body),
   stats: () => api.get("/api/admin/stats"),
-  source: () => api.get("/api/admin/source"),
-  saveSource: body => apiRequest("PUT", "/api/admin/source", body),
-  testSource: body => api.post("/api/admin/source/test", body),
-  syncSource: mode => api.post("/api/admin/source/sync", { mode }),
+  // Fuente A ("a") y Fuente B ("b").
+  sources: () => api.get("/api/admin/sources"),
+  saveSource: (slot, body) => apiRequest("PUT", `/api/admin/sources/${slot}`, body),
+  sourceAction: (slot, action, body = {}) => api.post(`/api/admin/sources/${slot}/${action}`, body),
+  sourceErrors: slot => api.get(`/api/admin/sources/${slot}/errors`),
   reindex: () => api.post("/api/admin/catalog/reindex")
 };

@@ -5,9 +5,9 @@
 import { json, errorResponse, corsHeaders, allowedOrigin, fail, intParam } from "./http.js";
 import { authenticate, requireUser, requireOwner } from "./auth.js";
 import { listTitles, searchTitles, titleDetail } from "./catalog.js";
-import { resolvePlayback } from "./play.js";
+import { resolvePlayback, listPlaybackSources } from "./play.js";
 import { adminRoutes } from "./admin.js";
-import { sourceAdminRoutes, catalogStatus } from "./source.js";
+import { sourcesAdminRoutes, catalogStatus } from "./sources.js";
 import { runPending, scheduleDaily, fetchEpisodesNow } from "./sync.js";
 import { log } from "./log.js";
 import { KINDS } from "./providers/contract.js";
@@ -56,9 +56,16 @@ const userRoutes = {
     return detail;
   },
 
+  // Fuentes que ofrecen un título o episodio (solo el nombre visible), para elegir en el reproductor.
+  "GET /api/catalog/titles/:id/sources": async ({ env, params, url }) => {
+    const episode = url.searchParams.get("episode");
+    return { sources: await listPlaybackSources(env, idParam(params.id), episode ? idParam(episode) : null) };
+  },
+
   "GET /api/catalog/titles/:id/play": async ({ env, params, url, user, fetchImpl }) => {
     const episode = url.searchParams.get("episode");
-    const result = await resolvePlayback(env, idParam(params.id), episode ? idParam(episode) : null, { fetchImpl });
+    const source = url.searchParams.get("source");
+    const result = await resolvePlayback(env, idParam(params.id), episode ? idParam(episode) : null, { fetchImpl, sourceId: source ? idParam(source) : null });
     if (result.error) {
       // El detalle técnico (servidores, códigos) solo lo ve el propietario; está en los registros.
       fail(502, user.role === "owner" ? result.error : "No se pudo obtener la reproducción de este título. Probá más tarde.", "play");
@@ -76,7 +83,7 @@ function compile(routes) {
   });
 }
 const USER = compile(userRoutes);
-const ADMIN = compile({ ...adminRoutes, ...sourceAdminRoutes });
+const ADMIN = compile({ ...adminRoutes, ...sourcesAdminRoutes });
 
 function match(table, method, pathname) {
   let pathFound = false;

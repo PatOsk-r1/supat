@@ -75,8 +75,8 @@ export async function createJob(env, provider, { mode = "incremental", trigger =
 // Toma el próximo trabajo pendiente con un candado (para que dos ejecuciones no lo procesen a la vez).
 async function claim(env, now, onlyJobId = null) {
   const row = onlyJobId
-    ? await env.DB.prepare(`SELECT id FROM sync_jobs WHERE id = ? AND status IN ${ACTIVE_STATES} AND locked_until < ?`).bind(onlyJobId, now).first()
-    : await env.DB.prepare(`SELECT id FROM sync_jobs WHERE status IN ${ACTIVE_STATES} AND next_run_at <= ? AND locked_until < ? ORDER BY next_run_at, id LIMIT 1`).bind(now, now).first();
+    ? await env.DB.prepare(`SELECT id FROM sync_jobs WHERE id = ? AND status IN ${ACTIVE_STATES} AND paused = 0 AND locked_until < ?`).bind(onlyJobId, now).first()
+    : await env.DB.prepare(`SELECT id FROM sync_jobs WHERE status IN ${ACTIVE_STATES} AND paused = 0 AND next_run_at <= ? AND locked_until < ? ORDER BY next_run_at, id LIMIT 1`).bind(now, now).first();
   if (!row) return null;
   // "stalls" sube al tomar el trabajo y vuelve a 0 cuando se guarda avance: si una ejecución
   // se corta (límite de CPU o de tiempo) sin guardar, queda contada.
@@ -199,10 +199,12 @@ export async function runJobStep(baseEnv, job, { fetchImpl = fetch, pages = Numb
     }
     const retryable = err instanceof ProviderError && err.retryable;
     const attempts = j.attempts + 1;
-    if (retryable && attempts < MAX_ATTEMPTS) {
-      const wait = 60000 * 2 ** (attempts - 1);
+    // Reintentos configurables por fuente (Ajustes); si no, 5 intentos desde 1 minuto.
+    const policy = def.retryPolicy ? def.retryPolicy(ctx.config) : { max: MAX_ATTEMPTS, delayMs: 60000 };
+    if (retryable && attempts < policy.max) {
+      const wait = Math.min(6 * 3600e3, policy.delayMs * 2 ** (attempts - 1));
       await saveJob(env, j, cursor, { status: "running", attempts, next_run_at: Date.now() + wait, locked_until: 0, last_error: message });
-      await log(env, "warn", "sync", `Trabajo ${j.id}: ${message} Reintento ${attempts}/${MAX_ATTEMPTS - 1} en ${wait / 60000} min.`, { providerId: provider.id, jobId: j.id, secrets: ctx.secrets });
+      await log(env, "warn", "sync", `Trabajo ${j.id}: ${message} Reintento ${attempts}/${policy.max - 1} en ${Math.round(wait / 1000)} s.`, { providerId: provider.id, jobId: j.id, secrets: ctx.secrets });
       return { ...j, status: "running", attempts };
     }
     const finished = Date.now();
@@ -262,4 +264,11 @@ export async function fetchEpisodesNow(env, sourceRow, { fetchImpl = fetch, maxP
     }
   }
   return saved;
+}
+
+// Pausar / reanudar: el trabajo conserva su posición; mientras está pausado, el cron no lo toma.
+export async function setPaused(env, jobId, paused) {
+  const res = await env.DB.prepare(`UPDATE sync_jobs SET paused = ?, next_run_at = ? WHERE id = ? AND status IN ${ACTIVE_STATES} RETURNING id`)
+    .bind(paused ? 1 : 0, Date.now(), jobId).first();
+  return Boolean(res);
 }

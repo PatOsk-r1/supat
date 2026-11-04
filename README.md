@@ -2,7 +2,7 @@
 
 Aplicación web de streaming: películas, series y anime.
 Es una **aplicación independiente**: **no trae contenido, credenciales ni catálogos de ejemplo**.
-Todo lo que se muestra y reproduce viene de **una única fuente de contenido** que configura el propietario en Ajustes.
+Todo lo que se muestra y reproduce viene de las **fuentes de contenido** (Fuente A y Fuente B) que configura el propietario en Ajustes.
 
 **Abrir en línea:** https://supat-h8tfw.web.app
 
@@ -10,30 +10,22 @@ Todo lo que se muestra y reproduce viene de **una única fuente de contenido** q
 
 Registro con correo y contraseña, verificación del correo, recuperación y cambio de contraseña, cerrar todas las sesiones y eliminar la cuenta. Con una cuenta se guardan **favoritos, listas (privadas o públicas) e historial**, y se ven en cualquier dispositivo. Para ver el catálogo hace falta una cuenta con el correo verificado. La seguridad está explicada en **[SEGURIDAD.md](SEGURIDAD.md)**.
 
-## Catálogo (servidor) y fuente de contenido
+## Catálogo (servidor) y fuentes de contenido
 
-El catálogo es **uno solo, compartido por todos los usuarios**. Lo arma un servidor en Cloudflare Workers con una base D1, ambos gratuitos, a partir de **una única fuente externa**.
+El catálogo es **uno solo, compartido por todos los usuarios**. Lo arma un servidor en Cloudflare Workers con una base D1, ambos gratuitos, a partir de **dos fuentes externas independientes**, Fuente A y Fuente B.
 
-El propietario configura la fuente en **Ajustes → Fuentes de contenido**:
+El propietario configura cada una en **Ajustes → Fuentes de contenido**, sin tocar código: conexión, autenticación, endpoints, paginación, mapeo de respuestas y reproducción. Cada tarjeta tiene herramientas para probar la conexión, el catálogo y la reproducción, y para activar, importar, pausar, reanudar y reiniciar la importación.
 
-- nombre y dirección base de la API;
-- la **API Key**, que solo se usa para el catálogo;
-- la **credencial de reproducción**, que solo se usa para pedir los enlaces;
-- las categorías: películas, series, anime y temporadas/episodios;
-- la especificación de rutas del adaptador.
+El servidor se encarga de:
 
-Desde ahí también ve el estado de conexión y prueba la conexión.
-
-Al guardar una configuración que funciona, el servidor se encarga de:
-
-- **Importar todo:** recorre todas las páginas, por tandas. Si se corta, sigue donde quedó; si falla, reintenta.
+- **Importar todo:** recorre todas las páginas, por tandas y sin perder el avance.
 - **Actualizar todos los días** de forma automática.
-- **Unir duplicados** usando los identificadores de TMDb e IMDb.
-- **Resolver los enlaces** al reproducir.
+- **Unir duplicados** por TMDb e IMDb, nunca por título.
+- **Resolver la reproducción** con la fuente que elija el usuario, o con la siguiente si una falla.
 
-Las credenciales quedan **cifradas en el servidor** y nunca llegan al navegador. Si la fuente no está configurada o falla, la app muestra que el catálogo no está disponible. No muestra contenido de relleno.
+Las credenciales quedan **cifradas en el servidor**. Si no hay contenido importado, la app lo dice: no muestra catálogos de ejemplo.
 
-Detalles, formato de la especificación, instalación y publicación: **[worker/README.md](worker/README.md)**.
+Detalles: **[worker/FUENTES.md](worker/FUENTES.md)** y **[worker/README.md](worker/README.md)**.
 
 ## Cómo abrirla en tu PC (Windows)
 

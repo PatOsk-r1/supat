@@ -1,6 +1,6 @@
 # Catálogo de Supat (API en Cloudflare Workers + D1)
 
-Servidor que guarda **un catálogo compartido por todos los usuarios**, importado de **una única fuente de contenido**. La fuente la configura el propietario en **Ajustes → Fuentes de contenido**. El servidor importa sus títulos, los guarda sin duplicados y, al reproducir, resuelve los enlaces.
+Servidor que guarda **un catálogo compartido por todos los usuarios**, importado de **dos fuentes de contenido independientes (Fuente A y Fuente B)**. Las configura el propietario en **Ajustes → Fuentes de contenido**, sin tocar código: ver **[FUENTES.md](FUENTES.md)**. El servidor importa sus títulos, los guarda sin duplicados y, al reproducir, resuelve los enlaces.
 
 ```
 Supat (navegador) ──token de Firebase──▶ Worker (worker/src) ──▶ D1 (base SQLite)
@@ -24,9 +24,10 @@ Supat (navegador) ──token de Firebase──▶ Worker (worker/src) ──▶
 | `src/catalog.js` | Guardar sin duplicados (TMDb/IMDb), episodios, listado, búsqueda y ficha. |
 | `src/sync.js` | Importación por tandas: reanudable, con reintentos y cron diario. |
 | `src/play.js` | Fuente de reproducción (prueba los proveedores en orden). |
-| `src/source.js` | La fuente única: configuración, prueba de las dos credenciales, sincronización y estado público. |
+| `src/sources.js` | Fuente A y Fuente B: configuración, herramientas de prueba, importación (iniciar, pausar, reanudar, reiniciar), errores y estado público. |
+| `src/providers/configurable.js` | Adaptador configurable: traduce la configuración de cada fuente al motor genérico y arma la reproducción. |
 | `src/admin.js` | Rutas del propietario: trabajos, registros, usuarios, infraestructura. |
-| `src/providers/` | Contrato de adaptadores y adaptador genérico HTTP/JSON. |
+| `src/providers/` | Contrato de adaptadores, motor genérico HTTP/JSON y adaptador configurable. |
 
 ## Roles y permisos
 
@@ -164,15 +165,11 @@ Solo informa si funcionó y, si no, por qué. Nunca muestra direcciones ni crede
 
 Para una API que no encaja en este formato, se crea un adaptador propio en `src/providers/`, con el contrato de `contract.js`, y se suma en `registry.js`.
 
-## Especificación incorporada al adaptador
+## Configuración desde Ajustes
 
-La especificación de la fuente real va en `src/providers/fuente-spec.js`, que hoy está vacía (`null`). Cuando está definida pasa esto:
+Fuente A y Fuente B se configuran completas desde **Ajustes → Fuentes de contenido**: conexión, autenticación, endpoints, paginación, mapeo y reproducción. Todo está explicado en **[FUENTES.md](FUENTES.md)**.
 
-- **Ajustes no muestra el campo de especificación.** El propietario solo carga nombre, dirección base, credenciales y categorías.
-- **El servidor siempre usa esa especificación.** Una especificación que llegue desde el navegador se ignora.
-- **La especificación no se manda al navegador.** Por eso las rutas de la API no quedan a la vista.
-
-Mientras esté vacía, Ajustes sigue ofreciendo el campo, como antes.
+El formato de especificación JSON de arriba es el del **motor genérico**. El adaptador configurable lo arma solo a partir de lo que se completa en Ajustes, así que no hace falta escribirlo a mano.
 
 ## Enlaces de reproducción y credencial de reproducción
 
@@ -228,7 +225,7 @@ Se prueba **en tu PC**, con una base local **separada**: `worker/.wrangler/real`
    npm run dev:emu
    ```
 
-5. Entrá con esa cuenta → **Ajustes → Fuentes de contenido** → completá y tocá **Guardar configuración**. Se prueba la conexión y, si funciona, arranca la importación.
+5. Entrá con esa cuenta → **Ajustes → Fuentes de contenido** → completá la tarjeta de la fuente → **Guardar configuración** → **Probar conexión**, **Probar catálogo**, **Probar reproducción** → **Activar** → **Iniciar importación**.
 6. Corré las pruebas de integración. La importación sigue sola cada minuto, y `SUPAT_IMPORT_MINUTOS` (por defecto 20) limita cuánto espera la prueba:
 
    ```bash

@@ -24,6 +24,7 @@ import { admin } from "../app/admin.js";
 import { centralAdmin } from "../app/central-admin.js";
 import { TAB_DATA } from "./views/central-admin.js";
 import { searchCentral } from "../providers/central.js";
+import { ALL_FIELDS } from "../shared/fuente-esquema.js";
 
 const defaultFilters = () => ({ category: "Todos", provider: "todos", sort: "destacados", limit: 0 });
 
@@ -35,7 +36,7 @@ export function startApp(app, extensions = {}) {
   const guestProgress = { save() {}, flush() {}, get: () => null, resumeTime: () => 0, isFinished: () => false, recent: () => [], all: () => [], remove: async () => {}, clear: async () => {} };
   const state = { route: parseRoute(location.hash), query: "", filters: defaultFilters(), season: 0, confirm: null, restartRequested: false, tmdbStatus: "", formError: "", formMessage: "", busy: false,
     central: { tab: null, data: {}, loading: false, error: "", editing: null, newAdapter: "", testResult: null, logLevel: "" },
-    remote: null, source: null };
+    remote: null, sources: null };
   const ctx = {
     catalog, settings, state, account, userdata, admin, ...extensions,
     get favorites() { return userdata.active ? userdata.favorites : guestFavorites; },
@@ -148,20 +149,27 @@ export function startApp(app, extensions = {}) {
   };
   const reloadCentral = () => ctx.loadCentral(state.central.tab, { force: true });
 
-  // Configuración de la fuente de contenido (solo propietario; nunca trae credenciales).
-  ctx.loadSource = async ({ quiet = false } = {}) => {
-    const prev = state.source;
+  // Fuente A y Fuente B (solo propietario; nunca trae credenciales).
+  ctx.loadSources = async ({ quiet = false } = {}) => {
+    const prev = state.sources;
     if (prev?.loading) return;
-    state.source = { ...prev, loading: true };
+    state.sources = { results: {}, errors: {}, ...prev, loading: true };
     if (!quiet) render();
     try {
-      const { source } = await centralAdmin.source();
-      state.source = { ...state.source, data: source, loading: false, error: "" };
+      const { sources } = await centralAdmin.sources();
+      state.sources = { ...state.sources, data: sources, loading: false, error: "" };
     } catch (err) {
-      state.source = { ...state.source, loading: false, error: err?.message || "No se pudo cargar la configuración de la fuente." };
+      state.sources = { ...state.sources, loading: false, error: err?.message || "No se pudieron cargar las fuentes." };
     }
     if (state.route.name === "ajustes" && !state.busy) render();
   };
+  const setSlot = (slot, source) => { state.sources = { ...state.sources, data: { ...state.sources.data, [slot]: source } }; };
+  const setResult = (slot, kind, value) => {
+    const results = { ...(state.sources.results || {}) };
+    results[slot] = { ...(results[slot] || {}), [kind]: value };
+    state.sources = { ...state.sources, results };
+  };
+  const refreshCatalog = () => { catalog.forgetThrottle("central"); catalog.load({ only: "central", force: true }).then(render); };
 
   // Redibuja como mucho una vez por cuadro. En la pantalla de reproducción no se redibuja
   // por cambios de catálogo, para no cortar el video.
@@ -296,21 +304,27 @@ export function startApp(app, extensions = {}) {
 
     // ---------- catálogo central (propietario) ----------
     "admin-tab": el => { state.adminTab = el.dataset.tab; state.formError = ""; state.formMessage = ""; state.central.editing = null; render(); },
-    // ---------- fuente de contenido (Ajustes, propietario) ----------
-    "source-test": el => {
-      const form = el.closest("form");
-      run(async () => {
-        const result = await centralAdmin.testSource(sourceFormBody(form, { forTest: true }));
-        state.source = { ...state.source, test: { ...result, at: Date.now() } };
-      });
-    },
-    "source-sync": el => {
-      const go = () => run(async () => {
-        const { job, existing } = await centralAdmin.syncSource(el.dataset.mode);
-        state.formMessage = existing ? `Ya había una importación en curso (#${job.id}).` : `Importación #${job.id}: ${job.status === "done" ? "terminada" : job.status === "failed" ? `falló (${job.lastError})` : "en curso; sigue sola cada minuto."}`;
-        await ctx.loadSource({ quiet: true });
-      });
-      if (el.dataset.mode === "full") confirmThen("source-full", go); else go();
+    // ---------- fuentes de contenido (Ajustes, propietario) ----------
+    "src-act": el => {
+      const { slot, act } = el.dataset;
+      const kindOf = attr => app.querySelector(`[${attr}="${slot}"]`)?.value;
+      const job = j => (j.status === "done" ? "terminada" : j.status === "failed" ? `falló (${j.lastError})` : "en curso; sigue sola cada minuto");
+      const tasks = {
+        "test-connection": async () => { setResult(slot, "connection", await centralAdmin.sourceAction(slot, "test-connection")); await ctx.loadSources({ quiet: true }); },
+        "test-catalog": async () => setResult(slot, "catalog", await centralAdmin.sourceAction(slot, "test-catalog", { kind: kindOf("data-src-kind") })),
+        "test-playback": async () => setResult(slot, "playback", await centralAdmin.sourceAction(slot, "test-playback", { kind: kindOf("data-src-play") })),
+        enable: async () => { setSlot(slot, (await centralAdmin.sourceAction(slot, "enable", { enabled: true })).source); state.formMessage = "Fuente activada."; refreshCatalog(); },
+        disable: async () => { setSlot(slot, (await centralAdmin.sourceAction(slot, "enable", { enabled: false })).source); state.formMessage = "Fuente desactivada: sus títulos dejan de mostrarse (no se borran)."; refreshCatalog(); },
+        import: async () => { const r = await centralAdmin.sourceAction(slot, "import", { mode: "full" }); state.formMessage = `Importación #${r.job.id}: ${job(r.job)}.`; await ctx.loadSources({ quiet: true }); },
+        "import-incremental": async () => { const r = await centralAdmin.sourceAction(slot, "import", { mode: "incremental" }); state.formMessage = `Sincronización #${r.job.id}: ${job(r.job)}.`; await ctx.loadSources({ quiet: true }); },
+        pause: async () => { setSlot(slot, (await centralAdmin.sourceAction(slot, "pause")).source); state.formMessage = "Importación en pausa. Lo importado se conserva."; },
+        resume: async () => { setSlot(slot, (await centralAdmin.sourceAction(slot, "resume")).source); state.formMessage = "Importación reanudada."; },
+        restart: async () => { setSlot(slot, (await centralAdmin.sourceAction(slot, "restart", { confirm: true })).source); state.formMessage = "Importación reiniciada desde la primera página. Lo importado se conserva."; },
+        errors: async () => { const { errors } = await centralAdmin.sourceErrors(slot); state.sources = { ...state.sources, errors: { ...(state.sources.errors || {}), [slot]: errors } }; }
+      };
+      if (!tasks[act]) return;
+      if (act === "restart") confirmThen(`src-restart:${slot}`, () => run(tasks.restart));
+      else run(tasks[act]);
     },
     "central-continue": el => run(async () => {
       const { job } = await centralAdmin.continueJob(el.dataset.id);
@@ -328,14 +342,21 @@ export function startApp(app, extensions = {}) {
     "remote-more": () => remoteSearch(state.remote?.q, (state.remote?.page || 1) + 1)
   };
 
-  // Formulario de la fuente → cuerpo para la API. Las credenciales vacías no se mandan (se conservan).
-  function sourceFormBody(form, { forTest = false } = {}) {
-    const data = Object.fromEntries(new FormData(form).entries());
-    const body = { label: data.label || "", baseUrl: data.baseUrl || "", categories: ["movie", "series", "anime", "episodes"].filter(k => data[`cat_${k}`]) };
-    if ("spec" in data) body.spec = data.spec; // solo si Ajustes muestra el campo (sin especificación incorporada)
-    for (const k of ["apiKey", "playbackKey"]) if (data[k]) body[k] = data[k];
-    if (!forTest) body.clearSecrets = ["apiKey", "playbackKey"].filter(k => data[`__clear_${k}`]);
-    return body;
+  // Tarjeta de una fuente → { form, secrets, clearSecrets }. Las credenciales vacías no se mandan (se conservan).
+  function sourceSlotBody(formEl) {
+    const form = {}, secrets = {}, clearSecrets = [];
+    for (const f of ALL_FIELDS) {
+      if (f.type === "secret" || f.type === "secretkv") {
+        const v = formEl.elements[`secret:${f.key}`]?.value || "";
+        if (v.trim()) secrets[f.key] = f.type === "secret" ? v.trim() : v;
+        if (formEl.elements[`clear:${f.key}`]?.checked) clearSecrets.push(f.key);
+      } else if (f.type === "check") {
+        form[f.key] = Boolean(formEl.elements[f.key]?.checked);
+      } else {
+        form[f.key] = formEl.elements[f.key]?.value ?? "";
+      }
+    }
+    return { form, secrets, clearSecrets };
   }
 
   // Ejecuta una operación de cuenta mostrando "ocupado", y después el mensaje o el error.
@@ -360,7 +381,7 @@ export function startApp(app, extensions = {}) {
     state.confirm = null;
     fn();
   }
-  const CONFIRM_ACTIONS = ["provider-remove", "data-clear", "logout-all", "list-delete", "history-clear", "admin-suspend", "admin-delete-list", "source-sync", "central-cancel", "central-role", "central-block"];
+  const CONFIRM_ACTIONS = ["provider-remove", "data-clear", "logout-all", "list-delete", "history-clear", "admin-suspend", "admin-delete-list", "src-act", "central-cancel", "central-role", "central-block"];
 
   app.addEventListener("click", ev => {
     const el = ev.target.closest("[data-action]");
@@ -382,17 +403,14 @@ export function startApp(app, extensions = {}) {
     const form = ev.target;
     ev.preventDefault();
     const data = Object.fromEntries(new FormData(form).entries());
-    if (form.dataset.form === "source") {
+    if (form.dataset.form === "source-slot") {
+      const slot = form.dataset.slot;
       run(async () => {
-        const result = await centralAdmin.saveSource(sourceFormBody(form));
-        state.source = { data: result.source, test: { ...result.test, at: Date.now() } };
-        if (result.test.ok) {
-          state.formMessage = result.job ? `Configuración guardada. Importación #${result.job.id} ${result.job.status === "done" ? "terminada" : "en curso: sigue sola cada minuto"}.` : "Configuración guardada.";
-          catalog.forgetThrottle("central");
-          catalog.load({ only: "central", force: true }).then(render);
-        } else {
-          state.formError = "Se guardó, pero la prueba de conexión falló: la fuente no se activó. Revisá el detalle en el estado de conexión.";
-        }
+        const { source } = await centralAdmin.saveSource(slot, sourceSlotBody(form));
+        setSlot(slot, source);
+        state.formMessage = source.missingToActivate.length
+          ? `Configuración guardada. Para activar e importar todavía falta: ${source.missingToActivate.join(", ")}.`
+          : "Configuración guardada.";
       });
     } else if (form.dataset.form === "tmdb") {
       settings.set("tmdbKey", (data.tmdbKey || "").trim());
@@ -562,7 +580,7 @@ export function startApp(app, extensions = {}) {
     if (state.route.name !== previous.name || state.route.id !== previous.id || state.route.mode !== previous.mode) {
       state.formError = ""; state.formMessage = "";
       if (state.route.name !== "cuenta") state.authReason = "";
-      if (state.route.name === "ajustes") state.source = null; // configuración fresca al entrar
+      if (state.route.name === "ajustes") state.sources = null; // configuración fresca al entrar
       if (state.route.name === "admin") { state.admin = null; state.central.data = {}; state.central.editing = null; } // datos frescos al entrar
       state.listItems = {}; // las listas se vuelven a leer al entrar (pueden haber cambiado)
     }

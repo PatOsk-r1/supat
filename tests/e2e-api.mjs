@@ -4,7 +4,8 @@
 //   - proveedor inventado (node tests/helpers/servidor-proveedor.mjs)
 // Uso: node tests/e2e-api.mjs
 import assert from "node:assert/strict";
-import { SPEC, KEY, PLAY_KEY } from "./helpers/proveedor-simulado.js";
+import { KEY, PLAY_KEY } from "./helpers/proveedor-simulado.js";
+import { FORM_A } from "./helpers/fuentes-simuladas.js";
 
 const AUTH = "http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1";
 const API = "http://127.0.0.1:8788";
@@ -46,14 +47,19 @@ assert.equal((await call("GET", "/api/admin/providers", user)).status, 403);
 assert.equal((await call("PATCH", "/api/admin/users/e2e-usuario", user, { role: "owner" })).status, 403);
 step("el usuario común no entra al panel ni se da permisos");
 
-const saved = await call("PUT", "/api/admin/source", owner, { label: "Fuente de prueba local", baseUrl: PROV, spec: JSON.stringify(SPEC), apiKey: KEY, playbackKey: PLAY_KEY, categories: ["movie", "series", "anime", "episodes"] });
+// Fuente A configurada como desde Ajustes, apuntando al proveedor inventado local.
+const form = { ...FORM_A(), baseUrl: PROV, "play.domains": "http://127.0.0.1:8790" };
+const saved = await call("PUT", "/api/admin/sources/a", owner, { form, secrets: { apiKey: KEY, playbackKey: PLAY_KEY } });
 assert.equal(saved.status, 200, JSON.stringify(saved.body));
 assert.ok(!JSON.stringify(saved.body).includes(KEY) && !JSON.stringify(saved.body).includes(PLAY_KEY));
-assert.equal(saved.body.test.ok, true, saved.body.test.message);
-step(`fuente guardada desde "Ajustes" (credenciales cifradas, no aparecen en la respuesta): ${saved.body.test.message}`);
-assert.equal((await call("PUT", "/api/admin/source", user, { label: "x" })).status, 403);
-step("el usuario común no puede configurar la fuente");
-
+assert.equal((await call("POST", "/api/admin/sources/a/enable", owner, { enabled: true })).status, 200);
+const conn = (await call("POST", "/api/admin/sources/a/test-connection", owner)).body;
+assert.equal(conn.ok, true, conn.message);
+step(`Fuente A guardada y activada desde "Ajustes" (credenciales cifradas, no aparecen en la respuesta): ${conn.message}`);
+assert.equal((await call("PUT", "/api/admin/sources/a", user, { form })).status, 403);
+step("el usuario común no puede configurar las fuentes");
+const imp = (await call("POST", "/api/admin/sources/a/import", owner, { mode: "full" })).body;
+saved.body.job = imp.job;
 let job = saved.body.job;
 for (let i = 0; i < 30 && job && ["queued", "running"].includes(job.status); i++) job = (await call("POST", `/api/admin/jobs/${job.id}/continue`, owner)).body.job;
 if (job) {

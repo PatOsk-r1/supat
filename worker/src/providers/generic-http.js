@@ -5,6 +5,8 @@ import { ProviderError, pick, readJsonBody, KINDS, playbackType } from "./contra
 
 // Credenciales de acceso a la API (catálogo, temporadas, episodios): solo en "auth".
 const API_SECRETS = ["apiKey", "token", "username", "password"];
+// Encabezados y parámetros de autenticación personalizados (Ajustes): authHeader_0, authParam_0, …
+const isCustomApiSecret = name => /^auth(Header|Param)_\d{1,2}$/.test(name);
 // Credencial de reproducción: solo en "playbackAuth", que se usa ÚNICAMENTE al pedir la fuente
 // (resolve / resolveEpisode). Nunca se manda en las consultas del catálogo.
 const PLAYBACK_SECRETS = ["playbackKey"];
@@ -41,7 +43,7 @@ function endpointProblems(ep, where) {
   if (ep.method && !["GET", "POST"].includes(ep.method)) p.push(`${where}: "method" solo puede ser GET o POST.`);
   const templates = [ep.path, ...Object.values(ep.query || {}), ...Object.values(ep.body || {})];
   for (const name of templates.flatMap(placeholders)) {
-    if (SECRET_KEYS.includes(name)) p.push(`${where}: las credenciales ({${name}}) solo pueden ir en "auth" o "playbackAuth".`);
+    if (SECRET_KEYS.includes(name) || isCustomApiSecret(name)) p.push(`${where}: las credenciales ({${name}}) solo pueden ir en "auth" o "playbackAuth".`);
   }
   if (ep.pagination && !PAGINATION.includes(ep.pagination.type)) p.push(`${where}: paginación desconocida (usar ${PAGINATION.join(", ")}).`);
   if (ep.pagination?.type === "cursor" && !ep.pagination.next) p.push(`${where}: la paginación por cursor necesita "next".`);
@@ -76,7 +78,7 @@ export function specProblems(spec) {
         if (other.includes(name)) p.push(key === "auth"
           ? `"auth" no puede usar {${name}}: la credencial de reproducción va solo en "playbackAuth".`
           : `"playbackAuth" no puede usar {${name}}: ahí solo va la credencial de reproducción ({playbackKey}).`);
-        else if (!allowed.includes(name)) p.push(`"${key}" usa {${name}}, que no es una credencial conocida.`);
+        else if (!allowed.includes(name) && !(key === "auth" && isCustomApiSecret(name))) p.push(`"${key}" usa {${name}}, que no es una credencial conocida.`);
       }
     }
   }
@@ -96,8 +98,8 @@ function base(config) {
 
 // Arma la consulta: dirección, encabezados y cuerpo, con la autenticación de la especificación.
 // `link`: ruta + consulta de la página siguiente que dio el propio proveedor (paginación "link").
-function buildRequest(ctx, spec, ep, vars, link = "", { playback = false } = {}) {
-  const root = base(ctx.config);
+function buildRequest(ctx, spec, ep, vars, link = "", { playback = false, baseUrl = null } = {}) {
+  const root = base(baseUrl ? { baseUrl } : ctx.config);
   const prefix = root.pathname.replace(/\/$/, "");
   const url = new URL(link ? root.origin + link : root.origin + prefix + render(ep.path, vars));
   if (url.origin !== root.origin) throw new ProviderError("La ruta apunta fuera de la dirección base.");
@@ -105,12 +107,13 @@ function buildRequest(ctx, spec, ep, vars, link = "", { playback = false } = {})
     const value = render(t, vars);
     if (value !== "" || !placeholders(t).length) url.searchParams.set(k, value);
   }
-  const headers = { Accept: "application/json", ...(spec.headers || {}) };
+  const headers = { Accept: "application/json", ...(spec.headers || {}), ...(ep.headers || {}) };
   const body = init => (init.method === "POST" && ep.body ? Object.fromEntries(Object.entries(ep.body).map(([k, t]) => [k, render(t, vars)])) : null);
   const init = { method: ep.method || "GET", headers };
   let json = body(init);
   // Cada credencial solo llega a las consultas que le corresponden.
   const only = keys => Object.fromEntries(keys.map(k => [k, ctx.secrets[k]]));
+  const apiSecrets = () => ({ ...only(API_SECRETS), ...Object.fromEntries(Object.entries(ctx.secrets || {}).filter(([k]) => isCustomApiSecret(k))) });
   const apply = (entries, secrets) => {
     for (const a of [].concat(entries || [])) {
       if (a.in === "basic") { headers.Authorization = `Basic ${btoa(`${secrets.username || ""}:${secrets.password || ""}`)}`; continue; }
@@ -120,7 +123,7 @@ function buildRequest(ctx, spec, ep, vars, link = "", { playback = false } = {})
       else url.searchParams.set(a.name, value);
     }
   };
-  apply(spec.auth, only(API_SECRETS));
+  apply(spec.auth, apiSecrets());
   if (playback) apply(spec.playbackAuth, only(PLAYBACK_SECRETS));
   if (json) {
     init.body = JSON.stringify(json);
@@ -128,6 +131,11 @@ function buildRequest(ctx, spec, ep, vars, link = "", { playback = false } = {})
   }
   return { url, init };
 }
+
+export async function callEndpoint(ctx, spec, ep, vars, opts = {}) {
+  return call(ctx, spec, ep, vars, "", opts);
+}
+export { render, placeholders, mapFields, rowsOf, sinceValue };
 
 async function call(ctx, spec, ep, vars, link = "", opts) {
   const { url, init } = buildRequest(ctx, spec, ep, vars, link, opts);
@@ -152,14 +160,38 @@ function pageVars(ep, cursor) {
   return { limit };
 }
 
-function nextCursor(ep, cursor, data, count, root) {
+// Huella corta de una página: si la API ignora el parámetro de página y devuelve siempre lo mismo,
+// la importación se corta en vez de pedir páginas para siempre.
+function pageFingerprint(rows) {
+  const text = JSON.stringify(rows);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619) >>> 0;
+  return `${rows.length}:${h.toString(36)}`;
+}
+
+function nextCursor(ep, cursor, data, count, root, rows = null) {
+  const next = nextCursorRaw(ep, cursor, data, count, root);
+  if (!next || !rows) return next;
+  const fp = pageFingerprint(rows);
+  if (cursor?.fp && cursor.fp === fp) return null; // misma página otra vez
+  return { ...next, fp };
+}
+
+function nextCursorRaw(ep, cursor, data, count, root) {
   const pg = ep.pagination || { type: "none" };
   if (pg.type === "none" || !count) return null;
   if ((cursor?.n || 0) + 1 >= MAX_PAGES) return null;
+  // Indicador de última página que da la propia fuente.
+  if (pg.lastPage) {
+    const last = pick(data, pg.lastPage);
+    if (last === true || last === 1 || last === "true" || last === "1") return null;
+  }
   const n = (cursor?.n || 0) + 1;
   if (pg.type === "page") {
     const page = cursor?.page ?? (Number(pg.start) || 1);
-    const total = Number(pick(data, pg.totalPages));
+    let total = Number(pick(data, pg.totalPages));
+    // Sin total de páginas, pero con total de resultados y tamaño de página: se calcula.
+    if (!total && pg.total && Number(pg.limit)) total = Math.ceil(Number(pick(data, pg.total)) / Number(pg.limit));
     if (total && page >= total) return null;
     return { page: page + 1, n };
   }
@@ -269,7 +301,7 @@ export default {
       const hasEpisodes = kind === "series" || (kind === "anime" && Boolean(spec.episodes) && (m.hasEpisodes ?? !playback));
       return { ...m, kind, playback, hasEpisodes, data: { ...m.data, id: m.data.id ?? m.id } };
     });
-    const next = nextCursor(ep, cursor, data, rows.length, root);
+    const next = nextCursor(ep, cursor, data, rows.length, root, rows);
     // El enlace siguiente se guarda en la base: se le quitan los parámetros de autenticación
     // (se vuelven a agregar al pedirlo).
     if (next?.link) {
@@ -303,7 +335,7 @@ export default {
       const playback = m.playback.url ? { url: m.playback.url, type: m.playback.type ?? ep.playbackType ?? "" } : spec.resolveEpisode ? { lazy: true } : null;
       return { ...m, season: m.season ?? season ?? ep.defaultSeason ?? 1, playback, data: { ...m.data, id: m.data.id ?? m.id } };
     });
-    const nextPage = nextCursor(ep, state.page, data, rows.length, base(ctx.config));
+    const nextPage = nextCursor(ep, state.page, data, rows.length, base(ctx.config), rows);
     let next = null;
     if (nextPage) next = { ...state, page: nextPage };
     else if (state.seasons && state.si + 1 < state.seasons.length) next = { seasons: state.seasons, si: state.si + 1 };

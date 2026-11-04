@@ -73,10 +73,19 @@ export default {
     }));
   },
 
-  async resolveSource(item, episode, config, { signal }) {
+  // Fuente elegida (sourceId) o la primera que funcione. Puede traer subtítulos y vencimiento.
+  async resolveSource(item, episode, config, { signal, sourceId = null } = {}) {
+    const params = new URLSearchParams();
+    if (episode) params.set("episode", episode.rawId);
+    if (sourceId) params.set("source", sourceId);
+    const res = await api.get(`/api/catalog/titles/${encodeURIComponent(item.rawId)}/play${params.size ? `?${params}` : ""}`, { signal });
+    return { url: res.url, type: res.type, subtitles: res.subtitles || [], expiresAt: res.expiresAt || null, embedOrigins: res.embedOrigins || [] };
+  },
+
+  // Qué fuentes ofrecen este título o episodio (solo el nombre visible que eligió el propietario).
+  async listSources(item, episode, config, { signal } = {}) {
     const query = episode ? `?episode=${encodeURIComponent(episode.rawId)}` : "";
-    const res = await api.get(`/api/catalog/titles/${encodeURIComponent(item.rawId)}/play${query}`, { signal });
-    return { url: res.url, type: res.type };
+    return (await api.get(`/api/catalog/titles/${encodeURIComponent(item.rawId)}/sources${query}`, { signal })).sources || [];
   }
 };
 

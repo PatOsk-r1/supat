@@ -78,7 +78,7 @@ function mountWatch(view, ctx, item, route, backHref) {
 
     if (source.type === "embed") {
       // Reproductor externo del proveedor: la app no controla el video ni guarda el progreso.
-      player = createEmbed(box, { url: source.url, title: item.title, allowedOrigins: option.embedOrigins });
+      player = createEmbed(box, { url: source.url, title: item.title, allowedOrigins: option.embedOrigins.length ? option.embedOrigins : [new URL(source.url).origin] });
       return;
     }
     player = createPlayer(box, {
@@ -87,6 +87,8 @@ function mountWatch(view, ctx, item, route, backHref) {
       subtitle: episode ? `T${seasonNumber} · E${episode.number} — ${episode.title}` : item.kind === "live" ? "En vivo" : "",
       live: item.kind === "live",
       preference: ctx.settings.get("player"),
+      // Enlaces que vencen: al reintentar (o si ya venció), se pide uno nuevo a la misma fuente.
+      refreshSource: option.refresh || null,
       startAt: !restart && ctx.settings.get("resume") ? ctx.progress.resumeTime(playId) : 0,
       backHref,
       next: next ? { label: "Siguiente", href: nextHref } : null,

@@ -1,11 +1,13 @@
 // Adaptadores disponibles en el servidor. Para sumar uno: crear su archivo en esta carpeta
 // con el contrato de contract.js e incluirlo en la lista de abajo.
 //
-// Supat usa una única fuente de contenido (worker/src/source.js), con el adaptador genérico.
+// Supat usa dos fuentes de contenido independientes (Fuente A y Fuente B, worker/src/sources.js),
+// configuradas desde Ajustes con el adaptador "configurable". El genérico queda como motor y para
+// especificaciones escritas a mano.
 import { validateAdapter, secretFields, guardedFetch, KINDS } from "./contract.js";
 import { decryptSecrets } from "../secrets.js";
 import genericHttp from "./generic-http.js";
-import { builtInSpec } from "./fuente-spec.js";
+import configurable from "./configurable.js";
 
 export const ADAPTERS = {};
 
@@ -15,7 +17,7 @@ export function registerAdapter(def) {
   ADAPTERS[def.id] = def;
 }
 
-[genericHttp].forEach(registerAdapter);
+[genericHttp, configurable].forEach(registerAdapter);
 
 export const kindsOf = (def, config) => (def.kindsFor ? def.kindsFor(config) : def.kinds).filter(k => KINDS.includes(k));
 
@@ -48,10 +50,12 @@ export async function contextFor(env, row, { fetchImpl = fetch, budget } = {}) {
   const def = ADAPTERS[row.adapter];
   if (!def) throw new Error(`El adaptador "${row.adapter}" ya no existe en el servidor.`);
   const config = JSON.parse(row.config_json || "{}");
-  // La fuente única usa la especificación incorporada al adaptador, si existe (aunque la guardada sea vieja).
-  if (row.id === "fuente" && builtInSpec()) config.spec = JSON.stringify(builtInSpec());
-  const secrets = await decryptSecrets(env, row.secrets_enc);
+  // Las credenciales personalizadas ("Nombre=valor") se separan para poder ocultarlas una por una.
+  const raw = await decryptSecrets(env, row.secrets_enc);
+  const secrets = def.expandSecrets ? def.expandSecrets(raw) : raw;
   let minIntervalMs = 0;
-  try { minIntervalMs = Math.min(10000, Math.max(0, Number(JSON.parse(config.spec || "{}").minIntervalMs) || 0)); } catch { /* sin especificación */ }
-  return { def, ctx: { config, secrets, providerId: row.id, fetch: guardedFetch({ secrets, minIntervalMs, fetchImpl, budget }) } };
+  if (def.minIntervalMs) minIntervalMs = def.minIntervalMs(config);
+  else try { minIntervalMs = Math.min(10000, Math.max(0, Number(JSON.parse(config.spec || "{}").minIntervalMs) || 0)); } catch { /* sin especificación */ }
+  const timeoutMs = def.timeoutMs ? def.timeoutMs(config) : undefined;
+  return { def, ctx: { config, secrets, providerId: row.id, fetch: guardedFetch({ secrets, minIntervalMs, timeoutMs, fetchImpl, budget }) } };
 }

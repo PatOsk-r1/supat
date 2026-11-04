@@ -151,6 +151,56 @@ Son las 47 anteriores más 28 nuevas, y corren sin red.
 - **La importación en Cloudflare con un catálogo grande**, en particular el límite de 10 ms de CPU con páginas grandes.
 - **El cron de cada minuto** con el programador real de Cloudflare.
 
+## 9. Fuente A y Fuente B (2026-11-04)
+
+### Pruebas automáticas: 88 pasan y 6 quedan omitidas (las de integración real)
+
+`tests/fuentes-ab.test.js` reemplaza a `tests/api-catalogo.test.js` y lo cubre todo. Usa **dos simuladores con APIs distintas**, definidos en `tests/helpers/fuentes-simuladas.js`:
+
+| | Autenticación | Paginación | Episodios | Reproducción |
+|---|---|---|---|---|
+| **Fuente A** | API Key en encabezado | Por página | Por temporada | Endpoint, con la credencial en un encabezado |
+| **Fuente B** | Token Bearer | Por offset con total | Lista única | Plantilla, con la credencial en la URL |
+
+Lo que cubren las pruebas:
+
+- **Configuración:** los campos empiezan vacíos; se informa qué falta para guardar y para activar.
+- **Normalización:** cada fuente se traduce a su propia especificación.
+- **Permisos:** solo el propietario configura, prueba o importa (401 sin sesión, 403 para un usuario común).
+- **Credenciales:** cifradas y nunca en respuestas, registros, catálogo ni trabajos; si se dejan vacías se conservan y "Borrar" las quita. Sin `SECRETS_KEY` no se guardan.
+- **Pruebas desde Ajustes:** conexión, catálogo (con los campos del mapeo encontrados) y reproducción de películas y episodios en las dos fuentes, sin devolver el enlace. Avisa cuando la credencial queda visible en la URL.
+- **Importación:**
+  - completa, por tandas y reanudable, con menos de 50 consultas a D1 por tanda;
+  - páginas grandes sin recortes; una API que ignora la página no genera un bucle infinito;
+  - categorías desmarcadas no se importan.
+- **Independencia:** si A falla, B importa y reproduce igual.
+- **Control de la importación:** reintentos configurados desde Ajustes; pausa (el cron la respeta), reanudación y reinicio con confirmación; detección de ejecuciones cortadas.
+- **Duplicados:** se unen entre fuentes por TMDb, nunca por título; un episodio puede estar en las dos fuentes.
+- **Reproducción:**
+  - se elige la fuente; si una falla, se usa la otra;
+  - se rechazan enlaces con una credencial privada o de un dominio no permitido;
+  - se informan subtítulos y vencimiento.
+- **Actualización:** incremental; un error no borra ni oculta nada; las bajas se marcan solo si ninguna otra fuente tiene el título.
+- **Estado público:** cuenta títulos únicos; también se probaron la búsqueda y el cron con las dos fuentes.
+
+### Pruebas reales en local
+
+- **`node tests/e2e-api.mjs` (workerd + D1 local + emuladores):** todo bien. Se configuró la Fuente A con el formulario y se probaron conexión, importación, búsqueda, reproducción y registros sin credenciales.
+- **Interfaz:**
+  - las dos tarjetas se ven con sus capacidades;
+  - "Probar reproducción" de A funcionó;
+  - guardar B vacía informa "Faltan datos para guardar: Nombre visible, URL base de la API".
+
+### Hallazgo corregido
+
+Una API que ignora el parámetro de página hacía que la importación pidiera páginas sin fin. Se corrigió de dos maneras: opción "Sin paginación" por endpoint y corte automático cuando una página llega igual a la anterior.
+
+### No verificado (depende de datos reales)
+
+- **Ninguna fuente real:** no se configuró ninguna, así que no hay pruebas de conexión, importación ni reproducción reales.
+- **Subtítulos externos en el navegador:** el código está, pero no hay una fuente real con subtítulos para probarlo.
+- **Cambiar de fuente en la pantalla de reproducción con dos fuentes reales:** probado por la API, no en el navegador.
+
 ## 6. No verificado
 
 - Pantalla completa: el navegador integrado de la app no la permite; el código maneja el rechazo. Falta probar en Chrome/Edge.

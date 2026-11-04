@@ -177,8 +177,24 @@ export const catalog = {
   // identificadores externos). Si un proveedor falla, los demás siguen funcionando.
   async sourcesFor(item, episode = null) {
     const options = [];
-    if ((episode || item).source) {
-      const own = providerOf(getInstance(item.providerId) || { type: "" });
+    const ownInstance = getInstance(item.providerId);
+    const own = providerOf(ownInstance || { type: "" });
+    // Un proveedor que agrupa varias fuentes (el catálogo central: Fuente A y Fuente B) informa
+    // cuáles ofrecen el título; cada una se resuelve por separado y un error no bloquea a las otras.
+    let listed = [];
+    if ((episode || item).source && typeof own?.listSources === "function") {
+      try { listed = await withTimeout(signal => own.listSources(item, episode, ownInstance.config, { instanceId: ownInstance.id, signal })); }
+      catch { listed = []; }
+    }
+    for (const s of listed.slice(0, LIMITS.maxSources)) {
+      const resolve = async () => {
+        const raw = await withTimeout(signal => own.resolveSource(item, episode, ownInstance.config, { instanceId: ownInstance.id, signal, sourceId: s.id }));
+        const checked = checkSource(raw, { embedOrigins: raw?.embedOrigins || [] });
+        return checked ? { ...checked, subtitles: raw.subtitles || [], expiresAt: raw.expiresAt || null } : null;
+      };
+      options.push({ providerId: item.providerId, providerName: s.label, label: String(s.label).slice(0, 40), embedOrigins: [], resolve, refresh: resolve });
+    }
+    if (!listed.length && (episode || item).source) {
       options.push({ providerId: item.providerId, providerName: item.providerName, label: item.providerName, embedOrigins: own?.embedOrigins || [], resolve: () => catalog.resolveSource(item, episode) });
     }
     const season = episode ? (item.seasons || []).find(s => s.episodes.includes(episode))?.number ?? null : null;

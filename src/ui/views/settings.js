@@ -1,11 +1,8 @@
-// Ajustes: fuente de contenido, TMDb, reproducción y datos guardados.
+// Ajustes: fuentes de contenido (propietario), TMDb, reproducción y datos guardados.
 import { escapeHtml as e } from "../../app/util.js";
 import { heading } from "../components.js";
 import { getInstance } from "../../providers/registry.js";
-
-const CATEGORY_LABELS = [["movie", "Películas"], ["series", "Series"], ["anime", "Anime"], ["episodes", "Temporadas y episodios"]];
-const JOB_PHASE = { items: "títulos", episodes: "temporadas y episodios", finish: "cerrando" };
-const JOB_END = { done: "terminada", failed: "falló", cancelled: "cancelada" };
+import { sourcesSection } from "./sources-settings.js";
 
 function dateText(ts) {
   return ts ? new Date(ts).toLocaleString("es", { dateStyle: "short", timeStyle: "short" }) : "nunca";
@@ -22,78 +19,14 @@ function catalogState(ctx) {
     <span class="provider-error">${e(st.error || "No se pudo cargar el catálogo.")}</span></div>`;
 }
 
-function importState(src) {
-  const job = src.activeJob, last = src.lastJob, c = src.counts || {};
-  let line;
-  if (job) {
-    line = `en curso (trabajo #${job.id}, ${job.mode === "full" ? "completa" : "cambios"}): ${e(JOB_PHASE[job.phase] || job.phase)} · ${job.pages} páginas · ${job.seen} recibidos · ${job.created} nuevos · ${job.updated} actualizados · ${job.episodes} episodios`
-      + (job.attempts ? ` · reintento ${job.attempts} a las ${dateText(job.nextRunAt)}` : "")
-      + (job.lastError ? `<span class="provider-error">${e(job.lastError)}</span>` : "");
-  } else if (last) {
-    line = `${JOB_END[last.status] || last.status} el ${dateText(last.finishedAt)}` + (last.lastError ? `<span class="provider-error">${e(last.lastError)}</span>` : "");
-  } else {
-    line = "todavía no se hizo";
-  }
-  return `<div class="provider-status ${src.lastStatus === "error" ? "status-error" : ""}" role="status" aria-live="polite">
-    <strong>Importación:</strong> ${line}
-    <span>En el catálogo: ${c.movie || 0} películas · ${c.series || 0} series · ${c.anime || 0} anime · ${c.episodes || 0} episodios. Última sincronización completa: ${dateText(src.lastSyncAt)}.</span>
-  </div>`;
-}
-
-// Formulario del propietario. Las credenciales guardadas nunca llegan acá: solo se sabe si están cargadas.
-function sourceForm(ctx) {
-  const st = ctx.state.source;
-  if (!st || (st.loading && !st.data)) return `<div class="empty" role="status"><div class="xp-spinner"></div>Cargando la configuración…</div>`;
-  if (st.error && !st.data) return `<p class="form-error" role="alert">${e(st.error)}</p>`;
-  const src = st.data;
-  const set = key => (src.secretsSet || []).includes(key);
-  const secret = (key, label, help) => `<div class="field"><label for="src-${key}">${label}</label>
-    <input id="src-${key}" name="${key}" type="password" autocomplete="new-password" spellcheck="false" placeholder="${set(key) ? "Guardada · dejá vacío para conservarla" : ""}" aria-describedby="src-${key}-help">
-    ${set(key) ? `<label class="check"><input type="checkbox" name="__clear_${key}"> Borrar la guardada</label>` : ""}
-    <small id="src-${key}-help">${help}</small></div>`;
-  let spec = src.spec || "";
-  try { if (spec) spec = JSON.stringify(JSON.parse(spec), null, 2); } catch { /* se muestra tal cual */ }
-  const test = st.test || (src.lastTest ? { ok: src.lastTest.ok, message: src.lastTest.message, at: src.lastTest.at } : null);
-  const confirmFull = ctx.state.confirm === "source-full";
-  const busy = ctx.state.busy ? "disabled" : "";
-  return `<form class="provider-form" data-form="source">
-    <div class="field"><label for="src-label">Nombre de la fuente *</label><input id="src-label" name="label" value="${e(src.label || "")}" maxlength="60" required></div>
-    <div class="field"><label for="src-base">Dirección base de la API *</label><input id="src-base" name="baseUrl" type="url" value="${e(src.baseUrl || "")}" placeholder="https://api.ejemplo.com/v1" spellcheck="false" aria-describedby="src-base-help">
-      <small id="src-base-help">El servidor arma cada ruta a partir de esta dirección, según la especificación del adaptador.</small></div>
-    ${secret("apiKey", "API Key", "Autentica las consultas al catálogo (títulos, temporadas, episodios). Solo se usa para eso.")}
-    ${secret("playbackKey", "Credencial de autorización de reproducción", "Se usa únicamente para pedir o habilitar los enlaces de reproducción. Nunca se manda en las consultas del catálogo.")}
-    <fieldset class="field"><legend>Categorías a importar</legend>
-      ${CATEGORY_LABELS.map(([k, label]) => `<label class="check"><input type="checkbox" name="cat_${k}" ${(src.categories || []).includes(k) ? "checked" : ""}> ${label}</label>`).join("")}
-    </fieldset>
-    ${src.builtInSpec ? "" : `<details class="field" ${src.configured ? "" : "open"}><summary>Especificación de rutas del adaptador (JSON) *</summary>
-      <textarea id="src-spec" name="spec" rows="14" spellcheck="false" class="code" aria-describedby="src-spec-help">${e(spec)}</textarea>
-      <small id="src-spec-help">Rutas, paginación, campos y dónde va cada credencial ("auth" para la API Key, "playbackAuth" para la de reproducción). Formato en worker/README.md; se arma con la documentación técnica de la API.</small></details>`}
-    <div class="provider-status ${test ? (test.ok ? "status-ok" : "status-error") : ""}" role="status">
-      <strong>Estado de conexión:</strong> ${test ? `${test.ok ? "✔ Correcta" : "✖ Con problemas"}${test.at ? ` (${dateText(test.at)})` : ""}` : src.configured ? "sin probar" : "sin configurar"}
-      ${test?.message ? `<span class="${test.ok ? "" : "provider-error"}">${e(test.message)}</span>` : ""}
-    </div>
-    <div class="form-actions">
-      <button type="button" class="secondary" data-action="source-test" data-key="source-test" ${busy}>Probar conexión</button>
-      <button type="submit" class="primary" ${busy}>Guardar configuración</button>
-    </div>
-    <p class="note">Al guardar se prueba la conexión. Si funciona, esta pasa a ser la única fuente activa y arranca la importación completa. Las credenciales se guardan cifradas en el servidor y nunca vuelven al navegador.</p>
-  </form>
-  ${src.configured ? importState(src) : ""}
-  ${src.enabled ? `<div class="provider-actions">
-    <button type="button" class="secondary" data-action="source-sync" data-mode="incremental" data-key="source-sync" ${busy}>Sincronizar cambios ahora</button>
-    <button type="button" class="danger ${confirmFull ? "confirming" : ""}" data-action="source-sync" data-mode="full" data-key="source-full" ${busy}>${confirmFull ? "¿Importar todo de nuevo? Tocá otra vez" : "Importación completa"}</button>
-    <a class="secondary" href="#/admin">Ver trabajos y registros</a>
-  </div>` : ""}`;
-}
-
 function sourceSection(ctx) {
   return `<section class="settings-block" aria-labelledby="h-fuentes">
-      <h2 id="h-fuentes">Fuentes de contenido</h2>
+      <h2 id="h-fuentes">${ctx.account.isOwner ? "Fuentes de contenido" : "Catálogo"}</h2>
       ${catalogState(ctx)}
       ${ctx.account.isOwner && ctx.state.formError ? `<p class="form-error" role="alert">${e(ctx.state.formError)}</p>` : ""}
       ${ctx.account.isOwner && ctx.state.formMessage ? `<p class="note ok" role="status">${e(ctx.state.formMessage)}</p>` : ""}
       ${ctx.account.isOwner && ctx.state.busy ? `<p class="note" role="status">Procesando…</p>` : ""}
-      ${ctx.account.isOwner ? sourceForm(ctx) : `<p class="note">El catálogo lo administra el propietario de Supat y es el mismo para todos los usuarios.</p>`}
+      ${ctx.account.isOwner ? sourcesSection(ctx) : `<p class="note">El catálogo es el mismo para todos los usuarios.</p>`}
     </section>`;
 }
 
@@ -157,8 +90,9 @@ export function render(ctx) {
     // El propietario ve su configuración; mientras hay una importación en curso, el avance se actualiza solo.
     mount() {
       if (!ctx.account.isOwner) return () => {};
-      if (!ctx.state.source) ctx.loadSource?.();
-      const timer = setInterval(() => { if (ctx.state.source?.data?.activeJob && !document.hidden) ctx.loadSource?.({ quiet: true }); }, 15000);
+      if (!ctx.state.sources) ctx.loadSources?.();
+      const importing = () => Object.values(ctx.state.sources?.data || {}).some(s => s.activeJob && !s.activeJob.paused);
+      const timer = setInterval(() => { if (importing() && !document.hidden) ctx.loadSources?.({ quiet: true }); }, 15000);
       return () => clearInterval(timer);
     }
   };

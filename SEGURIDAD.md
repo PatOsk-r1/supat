@@ -55,12 +55,12 @@ Detalle completo en [worker/README.md](worker/README.md). Resumen:
 - **Sesión:** cada pedido a la API lleva el token de Firebase. El servidor verifica la firma con las claves públicas de Google, el proyecto, el vencimiento y que la sesión no tenga más de 30 días.
 - **Roles:** `owner` y `user` se guardan en el servidor. Los propietarios iniciales salen de `OWNER_UIDS`, en la configuración del Worker. Nadie puede asignarse un rol: un dato agregado al token se ignora y nadie cambia su propio rol.
 - **Cuentas:** se respetan la suspensión y "cerrar todas las sesiones". El servidor lee el perfil de Firestore con el token del propio usuario, cada 5 minutos como máximo.
-- **Credenciales de la fuente:** son dos, la API Key y la credencial de reproducción.
+- **Credenciales de las fuentes (A y B):** API Key, token, usuario, contraseña, encabezados y parámetros personalizados, y credencial de reproducción.
   - Se guardan cifradas con AES-GCM. La clave `SECRETS_KEY` es un secreto del Worker y no está en el repositorio.
   - Solo el propietario las carga o prueba, en Ajustes → Fuentes de contenido.
   - Nunca se devuelven al navegador ni aparecen en registros, auditoría, trabajos o errores.
   - **Cada una se usa solo para lo suyo:** la API Key va en todas las consultas al catálogo, y la de reproducción solo al pedir enlaces. La especificación se rechaza si las mezcla.
-  - Un enlace que contiene una credencial no se entrega.
+  - Un enlace que contiene una credencial no se entrega. Única excepción: la de reproducción, cuando el propietario elige explícitamente "dentro de la URL que usa el navegador". En ese caso queda visible para quien reproduce, y la prueba de reproducción lo avisa.
 - **Auditoría:** cada acción del propietario queda registrada (quién, qué, sobre qué y qué campos), sin valores secretos.
 - **CORS:** solo los sitios de `ALLOWED_ORIGINS` pueden usar la API desde el navegador. Los cambios desde otro origen se rechazan.
 - **Pendiente:**

@@ -64,6 +64,10 @@ export function providerNet(state = {}) {
     [`${BASE}/series`]: (u, init) => {
       if (u.pathname !== "/v1/series") return { __status: 404, body: { error: "no existe" } };
       if (auth(init)) return auth(init);
+      const page = u.searchParams.get("page");
+      if (page) return Number(page) === 1
+        ? { data: [{ id: "s1", name: "Serie A", slug: "serie-a", first_air_date: "2015-02-02", tmdb_id: 501 }], total_pages: 2 }
+        : { data: Number(page) === 2 ? [{ id: "s2", name: "Serie B", slug: "serie-b", tmdb_id: 502 }] : [], total_pages: 2 };
       const cursor = u.searchParams.get("cursor");
       if (!cursor) return { data: [{ id: "s1", name: "Serie A", slug: "serie-a", first_air_date: "2015-02-02", tmdb_id: 501 }], meta: { next: "pagina2" } };
       return { data: [{ id: "s2", name: "Serie B", slug: "serie-b", tmdb_id: 502 }], meta: { next: null } };

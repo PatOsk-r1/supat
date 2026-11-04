@@ -32,7 +32,8 @@ export function playerMessage(container, title, detail, action = "") {
 
 /**
  * opts: {
- *   source: { url, type }, title, subtitle, live (bool), startAt (segundos),
+ *   source: { url, type, subtitles?: [{ url, lang, label }], expiresAt? }, title, subtitle, live (bool), startAt (segundos),
+ *   refreshSource?: async () => source   (enlaces que vencen: se pide uno nuevo al reintentar),
  *   preference: "auto" | "native" | "hlsjs",
  *   onProgress(time, duration), onEnded(), next: { label, href } | null, backHref
  * }
@@ -82,6 +83,30 @@ export function createPlayer(container, opts) {
   let lastSaved = 0;
   let hideTimer = 0;
   let seeking = false;
+  let refreshedOnce = false;
+
+  // Subtítulos externos (WebVTT). Si vienen de otro dominio, el video tiene que pedirse con CORS;
+  // si eso hace fallar la reproducción, se vuelve a intentar sin subtítulos.
+  function addTracks() {
+    video.querySelectorAll("track").forEach(t => t.remove());
+    const subs = (opts.source.subtitles || []).filter(t => /^https?:\/\//i.test(t.url || ""));
+    if (!subs.length) { video.removeAttribute("crossorigin"); return; }
+    video.crossOrigin = "anonymous";
+    subs.forEach((t, i) => {
+      const track = document.createElement("track");
+      Object.assign(track, { kind: "subtitles", src: t.url, srclang: t.lang || "", label: t.label || t.lang || `Subtítulos ${i + 1}` });
+      video.appendChild(track);
+    });
+  }
+  addTracks();
+  const expired = () => opts.source.expiresAt && Date.now() > opts.source.expiresAt - 30000;
+  async function refreshAndLoad(preference) {
+    try {
+      const fresh = await opts.refreshSource();
+      if (fresh?.url && !destroyed) { opts.source = fresh; addTracks(); }
+    } catch { /* se reintenta con el enlace anterior */ }
+    if (!destroyed) load(preference);
+  }
 
   const savedVolume = readJSON(VOLUME_KEY, { volume: 1, muted: false });
   video.volume = Number.isFinite(savedVolume.volume) ? savedVolume.volume : 1;
@@ -148,7 +173,13 @@ export function createPlayer(container, opts) {
       else video.webkitEnterFullscreen?.(); // iPhone: solo el video puede ir a pantalla completa
     },
     restart: () => { video.currentTime = 0; toast.hidden = true; video.play().catch(() => {}); },
-    retry: () => { clearError(); triedFallback = false; load(opts.preference); }
+    retry: () => {
+      clearError();
+      triedFallback = false;
+      // Un enlace que vence se renueva al reintentar (también si falló por otro motivo).
+      if (opts.refreshSource) refreshAndLoad(opts.preference);
+      else load(opts.preference);
+    }
   };
 
   root.addEventListener("click", ev => {
@@ -188,6 +219,20 @@ export function createPlayer(container, opts) {
     volumechange: updateVolume,
     ended: () => { saveProgress(true); updatePlayButtons(); opts.onEnded?.(); },
     error: () => {
+      // Enlace vencido: se pide uno nuevo automáticamente (una vez).
+      if (opts.refreshSource && expired() && !refreshedOnce) {
+        refreshedOnce = true;
+        refreshAndLoad(opts.preference);
+        return;
+      }
+      // Los subtítulos de otro dominio obligan a pedir el video con CORS; si eso falla, sin subtítulos.
+      if (video.hasAttribute("crossorigin") && (opts.source.subtitles || []).length) {
+        opts.source = { ...opts.source, subtitles: [] };
+        addTracks();
+        showToast("Los subtítulos no se pudieron usar con esta fuente; se reproduce sin ellos.");
+        load(opts.preference);
+        return;
+      }
       // En "Automático", si el HLS nativo falla se prueba una vez con hls.js.
       const isHls = detectType(opts.source.url, opts.source.type) === HLS_TYPE;
       if (attached?.engine === "native" && isHls && !triedFallback && (opts.preference || "auto") === "auto" && mseSupported()) {

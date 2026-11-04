@@ -456,3 +456,15 @@ textarea.code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
 .history.logs .log-warn { border-left-color: var(--warn); }
 .history.logs .log-error { border-left-color: var(--danger); }
 .history.logs span { word-break: break-word; }
+
+/* ---------- fuentes de contenido (Ajustes) ---------- */
+.source-card { gap: 12px; }
+.source-section { border-top: 1px solid var(--line); padding: 10px 0 4px; }
+.source-section > summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+.source-section[open] > summary { margin-bottom: 8px; }
+.source-group { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 10px 0; }
+.source-group > legend { padding: 0 6px; color: var(--muted); font-size: 13px; }
+.source-tools { flex-wrap: wrap; gap: 8px; }
+.tool-group { display: inline-flex; gap: 6px; align-items: center; }
+.genre.cap-off { opacity: .55; }
+.source-errors { border-top: 1px solid var(--line); padding-top: 8px; }

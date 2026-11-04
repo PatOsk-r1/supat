@@ -34,7 +34,7 @@ export const LIMITS = {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // fetch con límites para un proveedor. Lanza ProviderError (reintentable en 429/5xx/red).
-export function guardedFetch({ secrets = {}, minIntervalMs = 0, fetchImpl = fetch, budget = { left: LIMITS.maxSubrequests } } = {}) {
+export function guardedFetch({ secrets = {}, minIntervalMs = 0, timeoutMs = LIMITS.timeoutMs, fetchImpl = fetch, budget = { left: LIMITS.maxSubrequests } } = {}) {
   let last = 0;
   return async function providerFetch(url, init = {}) {
     if (budget.left <= 0) throw new ProviderError("Se alcanzó el máximo de consultas por ejecución; se sigue en la próxima tanda.", { retryable: true, status: -1 });
@@ -45,12 +45,12 @@ export function guardedFetch({ secrets = {}, minIntervalMs = 0, fetchImpl = fetc
     const u = new URL(url);
     if (!["http:", "https:"].includes(u.protocol)) throw new ProviderError("Solo se permiten direcciones http o https.");
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), LIMITS.timeoutMs);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     let res;
     try {
       res = await fetchImpl(u.toString(), { ...init, signal: controller.signal, redirect: "follow" });
     } catch (err) {
-      const why = controller.signal.aborted ? `no respondió en ${LIMITS.timeoutMs / 1000} s` : "no se pudo conectar";
+      const why = controller.signal.aborted ? `no respondió en ${timeoutMs / 1000} s` : "no se pudo conectar";
       throw new ProviderError(redact(`El proveedor ${why} (${u.host}).`, secrets), { retryable: true });
     } finally {
       clearTimeout(timer);
