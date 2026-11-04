@@ -13,6 +13,7 @@ import { encryptSecrets, decryptSecrets, redact, containsSecret } from "./secret
 import { audit, auditStatement, log } from "./log.js";
 import { createJob, runPending, activeJob } from "./sync.js";
 import { mergeConfig, jobOut } from "./admin.js";
+import { builtInSpec } from "./providers/fuente-spec.js";
 
 export const SOURCE_ID = "fuente";
 const ADAPTER = "http-json";
@@ -37,7 +38,7 @@ async function lastJob(env) {
 // Vista para el propietario: configuración sin credenciales (solo cuáles están cargadas).
 async function ownerView(env) {
   const row = await getRow(env);
-  if (!row) return { configured: false, categories: [...CATEGORIES], secretsSet: [], counts: {} };
+  if (!row) return { configured: false, builtInSpec: Boolean(builtInSpec()), categories: [...CATEGORIES], secretsSet: [], counts: {} };
   const config = JSON.parse(row.config_json || "{}");
   let secretsSet = [];
   try { secretsSet = Object.keys(await decryptSecrets(env, row.secrets_enc)).filter(k => SECRET_FIELDS.includes(k)); }
@@ -48,7 +49,9 @@ async function ownerView(env) {
     label: row.label,
     baseUrl: config.baseUrl || "",
     categories: categoriesOf(config),
-    spec: config.spec || "",
+    // Con la especificación incorporada, no se manda al navegador (no hace falta y no es configurable).
+    builtInSpec: Boolean(builtInSpec()),
+    spec: builtInSpec() ? "" : config.spec || "",
     secretsSet,
     enabled: Boolean(row.enabled),
     lastTest: row.last_test_at ? { at: row.last_test_at, ok: Boolean(row.last_test_ok), message: row.last_test_message } : null,
@@ -65,7 +68,11 @@ async function ownerView(env) {
 function inputConfig(body) {
   const config = {};
   if ("baseUrl" in body) config.baseUrl = String(body.baseUrl || "").trim();
-  if ("spec" in body) {
+  const builtIn = builtInSpec();
+  if (builtIn) {
+    // Especificación incorporada al adaptador: manda siempre; lo que venga del formulario se ignora.
+    config.spec = JSON.stringify(builtIn);
+  } else if ("spec" in body) {
     // Se guarda normalizada (sin sangría): el mismo contenido con otro formato no cuenta como cambio.
     const text = String(body.spec || "").trim();
     try { config.spec = text ? JSON.stringify(JSON.parse(text)) : ""; } catch { config.spec = text; }

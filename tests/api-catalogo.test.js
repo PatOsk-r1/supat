@@ -326,3 +326,31 @@ test("guardar sin cambios (aunque la especificación venga con otro formato) no 
   const changed = await saveSource(env, net, { baseUrl: BASE + "/", apiKey: "", playbackKey: "" });
   assert.notEqual(changed.job, null, "un cambio en la dirección sí vuelve a importar");
 });
+
+test("especificación incorporada al adaptador: Ajustes no la pide, no se manda al navegador y la del formulario se ignora", async t => {
+  const { setBuiltInSpecForTests } = await import("../worker/src/providers/fuente-spec.js");
+  setBuiltInSpecForTests(SPEC);
+  t.after(() => setBuiltInSpecForTests(undefined));
+  const env = makeEnv();
+  const net = providerNet();
+  const { spec, ...withoutSpec } = FORM;
+  const saved = await saveSource(env, net, { ...withoutSpec, spec: undefined });
+  assert.equal(saved.test.ok, true, saved.test.message);
+  assert.equal(saved.source.builtInSpec, true);
+  assert.equal(saved.source.spec, "");
+  assert.equal((await finish(env, net, saved.job)).status, "done");
+  // Una especificación mandada desde el navegador no reemplaza a la incorporada.
+  const again = await saveSource(env, net, { ...withoutSpec, apiKey: "", playbackKey: "", spec: JSON.stringify({ catalog: { movie: { path: "/otra", map: { id: "x", title: "y" } } } }) });
+  assert.equal(again.test.ok, true, again.test.message);
+  assert.equal(again.job, null, "no cambió nada estructural");
+  const view = JSON.stringify((await api(env, "GET", "/api/admin/source", OWNER)).body);
+  assert.ok(!view.includes("/movies") && !view.includes("playbackAuth"), "la especificación no llega al navegador");
+});
+
+test("sin especificación incorporada ni en el formulario, la fuente no se puede guardar (no se inventan rutas)", async () => {
+  const env = makeEnv();
+  const { spec, ...withoutSpec } = FORM;
+  const r = await api(env, "PUT", "/api/admin/source", { ...OWNER, fetchImpl: providerNet(), body: withoutSpec });
+  assert.equal(r.status, 400);
+  assert.match(r.body.error, /Especificación/);
+});

@@ -8,6 +8,19 @@ const PORT = 8790;
 const net = providerNet();
 
 createServer(async (req, res) => {
+  // "Video" de prueba: una lista HLS mínima y un segmento de bytes cualquiera (no es video real;
+  // sirve para probar que el arnés de integración sigue listas y segmentos).
+  if (req.url.startsWith("/cdn/")) {
+    const headers = { "Access-Control-Allow-Origin": "*" };
+    if (req.url.endsWith(".m3u8")) {
+      res.writeHead(200, { ...headers, "Content-Type": "application/vnd.apple.mpegurl" });
+      res.end("#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\nseg0.ts\n#EXT-X-ENDLIST\n");
+    } else {
+      res.writeHead(req.headers.range ? 206 : 200, { ...headers, "Content-Type": req.url.endsWith(".ts") ? "video/mp2t" : "video/mp4" });
+      res.end(Buffer.alloc(1024, 0x47));
+    }
+    return;
+  }
   const url = BASE + req.url.replace(/^\/v1/, "");
   const headers = { "X-Api-Key": req.headers["x-api-key"] };
   if (req.headers["x-play-token"]) headers["X-Play-Token"] = req.headers["x-play-token"];

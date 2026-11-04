@@ -331,7 +331,8 @@ export function startApp(app, extensions = {}) {
   // Formulario de la fuente → cuerpo para la API. Las credenciales vacías no se mandan (se conservan).
   function sourceFormBody(form, { forTest = false } = {}) {
     const data = Object.fromEntries(new FormData(form).entries());
-    const body = { label: data.label || "", baseUrl: data.baseUrl || "", spec: data.spec || "", categories: ["movie", "series", "anime", "episodes"].filter(k => data[`cat_${k}`]) };
+    const body = { label: data.label || "", baseUrl: data.baseUrl || "", categories: ["movie", "series", "anime", "episodes"].filter(k => data[`cat_${k}`]) };
+    if ("spec" in data) body.spec = data.spec; // solo si Ajustes muestra el campo (sin especificación incorporada)
     for (const k of ["apiKey", "playbackKey"]) if (data[k]) body[k] = data[k];
     if (!forTest) body.clearSecrets = ["apiKey", "playbackKey"].filter(k => data[`__clear_${k}`]);
     return body;

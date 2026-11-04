@@ -65,9 +65,9 @@ function sourceForm(ctx) {
     <fieldset class="field"><legend>Categorías a importar</legend>
       ${CATEGORY_LABELS.map(([k, label]) => `<label class="check"><input type="checkbox" name="cat_${k}" ${(src.categories || []).includes(k) ? "checked" : ""}> ${label}</label>`).join("")}
     </fieldset>
-    <details class="field" ${src.configured ? "" : "open"}><summary>Especificación de rutas del adaptador (JSON) *</summary>
+    ${src.builtInSpec ? "" : `<details class="field" ${src.configured ? "" : "open"}><summary>Especificación de rutas del adaptador (JSON) *</summary>
       <textarea id="src-spec" name="spec" rows="14" spellcheck="false" class="code" aria-describedby="src-spec-help">${e(spec)}</textarea>
-      <small id="src-spec-help">Rutas, paginación, campos y dónde va cada credencial ("auth" para la API Key, "playbackAuth" para la de reproducción). Formato en worker/README.md; se arma con la documentación técnica de la API.</small></details>
+      <small id="src-spec-help">Rutas, paginación, campos y dónde va cada credencial ("auth" para la API Key, "playbackAuth" para la de reproducción). Formato en worker/README.md; se arma con la documentación técnica de la API.</small></details>`}
     <div class="provider-status ${test ? (test.ok ? "status-ok" : "status-error") : ""}" role="status">
       <strong>Estado de conexión:</strong> ${test ? `${test.ok ? "✔ Correcta" : "✖ Con problemas"}${test.at ? ` (${dateText(test.at)})` : ""}` : src.configured ? "sin probar" : "sin configurar"}
       ${test?.message ? `<span class="${test.ok ? "" : "provider-error"}">${e(test.message)}</span>` : ""}

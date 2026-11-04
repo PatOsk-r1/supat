@@ -5,6 +5,7 @@
 import { validateAdapter, secretFields, guardedFetch, KINDS } from "./contract.js";
 import { decryptSecrets } from "../secrets.js";
 import genericHttp from "./generic-http.js";
+import { builtInSpec } from "./fuente-spec.js";
 
 export const ADAPTERS = {};
 
@@ -47,6 +48,8 @@ export async function contextFor(env, row, { fetchImpl = fetch, budget } = {}) {
   const def = ADAPTERS[row.adapter];
   if (!def) throw new Error(`El adaptador "${row.adapter}" ya no existe en el servidor.`);
   const config = JSON.parse(row.config_json || "{}");
+  // La fuente única usa la especificación incorporada al adaptador, si existe (aunque la guardada sea vieja).
+  if (row.id === "fuente" && builtInSpec()) config.spec = JSON.stringify(builtInSpec());
   const secrets = await decryptSecrets(env, row.secrets_enc);
   let minIntervalMs = 0;
   try { minIntervalMs = Math.min(10000, Math.max(0, Number(JSON.parse(config.spec || "{}").minIntervalMs) || 0)); } catch { /* sin especificación */ }

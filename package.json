@@ -14,6 +14,10 @@
     "emuladores": "firebase emulators:start --only auth,firestore --project demo-supat",
     "api:dev": "wrangler dev --config worker/wrangler.toml --env local --port 8788 --ip 127.0.0.1 --test-scheduled",
     "api:migrar:local": "wrangler d1 migrations apply supat-catalogo --local --config worker/wrangler.toml --env local",
+    "api:real:migrar": "wrangler d1 migrations apply supat-catalogo --local --config worker/wrangler.toml --env local --persist-to worker/.wrangler/real",
+    "api:real": "wrangler dev --config worker/wrangler.toml --env local --port 8788 --ip 127.0.0.1 --test-scheduled --persist-to worker/.wrangler/real",
+    "cuenta:local": "node scripts/cuenta-local.mjs",
+    "test:integracion": "node --test tests/integracion-real.test.js",
     "api:migrar": "wrangler d1 migrations apply supat-catalogo --remote --config worker/wrangler.toml",
     "api:publicar": "wrangler deploy --config worker/wrangler.toml --env=\"\"",
     "api:clave": "node scripts/clave-secretos.mjs"

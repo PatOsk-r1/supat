@@ -164,6 +164,93 @@ Solo informa si funcionó y, si no, por qué. Nunca muestra direcciones ni crede
 
 Para una API que no encaja en este formato, se crea un adaptador propio en `src/providers/`, con el contrato de `contract.js`, y se suma en `registry.js`.
 
+## Especificación incorporada al adaptador
+
+La especificación de la fuente real va en `src/providers/fuente-spec.js`, que hoy está vacía (`null`). Cuando está definida pasa esto:
+
+- **Ajustes no muestra el campo de especificación.** El propietario solo carga nombre, dirección base, credenciales y categorías.
+- **El servidor siempre usa esa especificación.** Una especificación que llegue desde el navegador se ignora.
+- **La especificación no se manda al navegador.** Por eso las rutas de la API no quedan a la vista.
+
+Mientras esté vacía, Ajustes sigue ofreciendo el campo, como antes.
+
+## Enlaces de reproducción y credencial de reproducción
+
+El servidor **nunca entrega un enlace que contenga la credencial de reproducción**. Según cómo funcione la API, hay tres casos:
+
+| Cómo genera los enlaces la API | Qué hace Supat | ¿Hace falta un proxy? |
+|---|---|---|
+| **A.** El servidor pide un enlace con la credencial (`resolve` + `playbackAuth`) y la API devuelve un enlace **temporal** (con token propio, firmado o que vence) que no contiene la credencial. | Lo pide en el servidor y entrega solo ese enlace temporal. Ya está implementado. | No |
+| **B.** El enlace se **firma** con la credencial: por ejemplo, un HMAC con fecha de vencimiento, sin mandarla. | Habría que implementar la firma exacta que indique la documentación. Al navegador solo le llega la firma, que vence. | No |
+| **C.** El video exige la credencial **en cada pedido** (en la dirección o en un encabezado), también en cada segmento HLS. | Hoy se rechaza, porque entregar el enlace expondría la credencial. | Sí |
+
+**Sobre un proxy de video en Cloudflare** (datos consultados el 2026-11-03 en developers.cloudflare.com y cloudflare.com):
+
+- **Lo que sí permite el plan gratuito:**
+  - Reenviar el video, porque eso no gasta CPU: "Waiting on network requests… does not count toward CPU time".
+  - Respuestas largas: no hay límite de duración mientras el cliente siga conectado.
+- **Pedidos por día:** el límite es **100.000/día**. En HLS **cada segmento es un pedido**. Una película de 2 horas con segmentos de 6 s son unos 1.200 pedidos, así que alcanza para unas **80 horas de reproducción por día en total**, para todos los usuarios juntos. Al pasarse, la API deja de responder hasta el día siguiente: no cobra, pero deja de funcionar todo el catálogo.
+- **Condiciones de uso:** las condiciones del servicio dicen: *"Cloudflare offers specific Paid Services (e.g., the Developer Platform, Images, and Stream) that you must use in order to serve video and other large files via the CDN"*. Servir video a través del plan gratuito tiene **riesgo de incumplir las condiciones** y de que suspendan la cuenta.
+
+**Conclusión:** el proxy completo **no es viable** en el plan gratuito y **no está implementado**. Lo recomendable es el caso A o el B. Si la documentación dice que es el caso C, hay que decidirlo antes de seguir, porque implica un plan pago o asumir el riesgo.
+
+Variante intermedia, también **no implementada**: si solo la **lista** HLS exige la credencial y los segmentos no, se podría hacer un proxy solo de la lista. Serían pocos pedidos y poco tráfico, pero solo sirve si la documentación lo confirma.
+
+## Integración real (antes de publicar)
+
+Se prueba **en tu PC**, con una base local **separada**: `worker/.wrangler/real` no se mezcla con la de las pruebas. Las credenciales se cargan **solo en Ajustes** de la app local y quedan cifradas en esa base. No pasan por archivos, por la terminal ni por el chat.
+
+1. Arrancá los emuladores:
+
+   ```bash
+   npm run emuladores
+   ```
+
+2. En otra terminal, creá la base separada y arrancá la API sobre ella:
+
+   ```bash
+   npm run api:real:migrar
+   ```
+
+   ```bash
+   npm run api:real
+   ```
+
+3. En otra terminal, creá la cuenta de propietario del emulador. Muestra el correo y la contraseña de prueba.
+
+   ```bash
+   npm run cuenta:local
+   ```
+
+4. En otra terminal, arrancá la app local:
+
+   ```bash
+   npm run dev:emu
+   ```
+
+5. Entrá con esa cuenta → **Ajustes → Fuentes de contenido** → completá y tocá **Guardar configuración**. Se prueba la conexión y, si funciona, arranca la importación.
+6. Corré las pruebas de integración. La importación sigue sola cada minuto, y `SUPAT_IMPORT_MINUTOS` (por defecto 20) limita cuánto espera la prueba:
+
+   ```bash
+   SUPAT_INTEGRACION=1 npm run test:integracion
+   ```
+
+   En PowerShell:
+
+   ```powershell
+   $env:SUPAT_INTEGRACION="1"; npm.cmd run test:integracion
+   ```
+
+Las pruebas de `tests/integracion-real.test.js` verifican:
+
+- las dos credenciales;
+- que la importación termine sin error;
+- que haya títulos de cada categoría activa, con pósters e identificadores;
+- una serie con temporadas y episodios;
+- que los enlaces de una película, un episodio y un anime respondan de verdad: para MP4, el primer KB; para HLS, la lista y su primer segmento.
+
+También informan si el servidor del video permite CORS, que hls.js necesita en el navegador. Nunca muestran direcciones, credenciales ni nombres. Con `npm test` quedan omitidas.
+
 ## Probar en tu PC (sin cuenta de Cloudflare)
 
 ```bash
