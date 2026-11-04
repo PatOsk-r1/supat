@@ -320,10 +320,12 @@ export function startApp(app, extensions = {}) {
         pause: async () => { setSlot(slot, (await centralAdmin.sourceAction(slot, "pause")).source); state.formMessage = "Importación en pausa. Lo importado se conserva."; },
         resume: async () => { setSlot(slot, (await centralAdmin.sourceAction(slot, "resume")).source); state.formMessage = "Importación reanudada."; },
         restart: async () => { setSlot(slot, (await centralAdmin.sourceAction(slot, "restart", { confirm: true })).source); state.formMessage = "Importación reiniciada desde la primera página. Lo importado se conserva."; },
+        "restart-removals": async () => { setSlot(slot, (await centralAdmin.sourceAction(slot, "restart", { confirm: true, allowRemovals: true })).source); state.formMessage = "Importación reiniciada. Al terminar, lo que la fuente ya no ofrezca se marcará como no disponible (no se borra)."; },
         errors: async () => { const { errors } = await centralAdmin.sourceErrors(slot); state.sources = { ...state.sources, errors: { ...(state.sources.errors || {}), [slot]: errors } }; }
       };
       if (!tasks[act]) return;
       if (act === "restart") confirmThen(`src-restart:${slot}`, () => run(tasks.restart));
+      else if (act === "restart-removals") confirmThen(`src-removals:${slot}`, () => run(tasks["restart-removals"]));
       else run(tasks[act]);
     },
     "central-continue": el => run(async () => {

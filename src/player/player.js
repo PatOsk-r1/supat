@@ -63,6 +63,7 @@ export function createPlayer(container, opts) {
           <span class="xp-spacer"></span>
           ${opts.next ? `<a class="xp-btn xp-next" href="${escapeHtml(opts.next.href)}">${escapeHtml(opts.next.label)} ⏭</a>` : ""}
           <select class="xp-quality" aria-label="Calidad" hidden></select>
+          <select class="xp-subs" aria-label="Subtítulos" hidden></select>
           <button type="button" class="xp-btn" data-xp="mute" aria-label="Silenciar">🔊</button>
           <input class="xp-volume" type="range" min="0" max="1" step="0.05" aria-label="Volumen">
           <button type="button" class="xp-btn" data-xp="fullscreen" aria-label="Pantalla completa">⛶</button>
@@ -74,7 +75,7 @@ export function createPlayer(container, opts) {
   const root = container.querySelector(".xp");
   const video = root.querySelector("video");
   const $ = sel => root.querySelector(sel);
-  const seek = $(".xp-seek"), time = $(".xp-time"), volume = $(".xp-volume"), quality = $(".xp-quality");
+  const seek = $(".xp-seek"), time = $(".xp-time"), volume = $(".xp-volume"), quality = $(".xp-quality"), subsSelect = $(".xp-subs");
   const spinner = $(".xp-spinner"), bigPlay = $(".xp-bigplay"), errorBox = $(".xp-error"), toast = $(".xp-toast");
 
   let attached = null;
@@ -97,6 +98,17 @@ export function createPlayer(container, opts) {
       Object.assign(track, { kind: "subtitles", src: t.url, srclang: t.lang || "", label: t.label || t.lang || `Subtítulos ${i + 1}` });
       video.appendChild(track);
     });
+    updateSubsMenu();
+  }
+  // Selector de subtítulos (los navegadores los dejan apagados si no se eligen).
+  function updateSubsMenu() {
+    if (!subsSelect) return;
+    const tracks = [...video.querySelectorAll("track")];
+    subsSelect.hidden = !tracks.length;
+    subsSelect.innerHTML = `<option value="-1">Sin subtítulos</option>` + tracks.map((t, i) => `<option value="${i}">${escapeHtml(t.label)}</option>`).join("");
+  }
+  function chooseSubs(index) {
+    [...video.textTracks].forEach((t, i) => { t.mode = i === index ? "showing" : "disabled"; });
   }
   addTracks();
   const expired = () => opts.source.expiresAt && Date.now() > opts.source.expiresAt - 30000;
@@ -207,6 +219,7 @@ export function createPlayer(container, opts) {
   seek?.addEventListener("change", () => { video.currentTime = +seek.value; seeking = false; });
   volume.addEventListener("input", () => { video.volume = +volume.value; video.muted = +volume.value === 0; });
   quality.addEventListener("change", () => attached?.setLevel?.(+quality.value));
+  subsSelect.addEventListener("change", () => chooseSubs(+subsSelect.value));
 
   const videoEvents = {
     playing: () => { spinner.hidden = true; bigPlay.hidden = true; clearError(); updatePlayButtons(); wakeControls(); },

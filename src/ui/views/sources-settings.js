@@ -69,6 +69,7 @@ function card(ctx, slot) {
   const c = src.counts || {};
   const act = (action, text, extra = "", cls = "secondary") => `<button type="button" class="${cls}" data-action="src-act" data-slot="${slot}" data-act="${action}" data-key="src:${slot}:${action}" ${extra} ${busy}>${text}</button>`;
   const restartKey = `src-restart:${slot}`;
+  const removalsKey = `src-removals:${slot}`;
   const errors = st.errors?.[slot];
   return `<article class="provider source-card ${src.enabled ? "" : "is-off"}" aria-labelledby="h-src-${slot}">
     <header class="provider-head"><div>
@@ -95,6 +96,8 @@ function card(ctx, slot) {
       ${job && !job.paused ? act("pause", "Pausar importación") : ""}
       ${job && job.paused ? act("resume", "Reanudar importación", "", "primary") : ""}
       ${src.enabled ? `<button type="button" class="danger ${confirm === restartKey ? "confirming" : ""}" data-action="src-act" data-slot="${slot}" data-act="restart" data-key="${restartKey}" ${busy}>${confirm === restartKey ? "¿Reiniciar desde cero? Tocá de nuevo" : "Reiniciar importación"}</button>` : ""}
+      ${src.enabled ? `<button type="button" class="danger ${confirm === removalsKey ? "confirming" : ""}" data-action="src-act" data-slot="${slot}" data-act="restart-removals" data-key="${removalsKey}" ${busy}
+        title="Usalo si la fuente realmente quitó muchos títulos: una importación completa normal no los oculta por precaución.">${confirm === removalsKey ? "¿Confirmar bajas y reiniciar? Tocá de nuevo" : "Reiniciar y confirmar bajas"}</button>` : ""}
       ${act("errors", errors ? "Actualizar errores" : "Ver errores")}
     </div>` : ""}
     ${result(res.connection)}${result(res.catalog)}${result(res.playback)}

@@ -101,7 +101,10 @@ export async function upsertTitles(env, providerId, items, { now = Date.now(), t
       // Si el título lo creó este proveedor, sus datos mandan; si no, solo completa lo que falta.
       const f = titleFields(t);
       const update = own
-        ? `UPDATE titles SET title = ?, title_norm = ?, original_title = ?, year = ?, description = ?, poster = ?, backdrop = ?, categories_json = ?, rating = ?, has_episodes = MAX(has_episodes, ?), updated_at = ?${sets.map(s => ", " + s).join("")} WHERE id = ?`
+        // La fuente que creó el título manda, pero un campo que ahora llega vacío NO borra el guardado.
+        ? `UPDATE titles SET title = ?, title_norm = ?, original_title = COALESCE(NULLIF(?, ''), original_title), year = COALESCE(?, year), description = COALESCE(NULLIF(?, ''), description),
+            poster = COALESCE(NULLIF(?, ''), poster), backdrop = COALESCE(NULLIF(?, ''), backdrop), categories_json = COALESCE(NULLIF(?, '[]'), categories_json), rating = COALESCE(?, rating),
+            has_episodes = MAX(has_episodes, ?), updated_at = ?${sets.map(s => ", " + s).join("")} WHERE id = ?`
         : `UPDATE titles SET original_title = COALESCE(NULLIF(original_title, ''), ?), year = COALESCE(year, ?), description = COALESCE(NULLIF(description, ''), ?), poster = COALESCE(NULLIF(poster, ''), ?), backdrop = COALESCE(NULLIF(backdrop, ''), ?), rating = COALESCE(rating, ?), has_episodes = MAX(has_episodes, ?), updated_at = ?${sets.map(s => ", " + s).join("")} WHERE id = ?`;
       const bind = own ? [...f, t.hasEpisodes ? 1 : 0, now, ...binds, row.id] : [t.originalTitle, t.year, t.description, t.poster, t.backdrop, t.rating, t.hasEpisodes ? 1 : 0, now, ...binds, row.id];
       statements.push(env.DB.prepare(update).bind(...bind));

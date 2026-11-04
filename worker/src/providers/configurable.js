@@ -15,6 +15,12 @@ const clamp = (v, min, max, def) => {
 const str = v => String(v ?? "").trim();
 const formOf = config => (config && typeof config.form === "object" && config.form) || {};
 
+// IDs guardados con "espacio de nombres", para que no choquen:
+//   títulos: "<tipo>:<id>"  (una película y una serie pueden tener el mismo id en la fuente);
+//   episodios: "<id de la serie guardado>/<id>"  (muchas fuentes repiten "1", "2"… en cada serie).
+// El ID ORIGINAL de la fuente queda en data.id y es el que se usa en rutas y plantillas.
+const rawId = src => (src?.data?.id !== undefined && src.data.id !== null && src.data.id !== "" ? String(src.data.id) : String(src?.externalId ?? "").replace(/^[a-z]+:/, ""));
+
 // Credenciales personalizadas ("Nombre=valor" por línea) → authHeader_0, authParam_0, …
 export function expandSecrets(secrets = {}) {
   const out = { ...secrets };
@@ -238,7 +244,7 @@ export default {
         const counts = [item.data?.seasonsCount, item.data?.episodesCount].filter(v => v !== undefined && v !== null && v !== "");
         hasEpisodes = Boolean(spec.episodes) && (counts.length ? counts.some(v => Number(v) > 0) : true);
       }
-      return { ...item, playback, hasEpisodes };
+      return { ...item, id: item.id == null || item.id === "" ? item.id : `${kind}:${item.id}`, playback, hasEpisodes };
     });
     return page;
   },
@@ -246,8 +252,13 @@ export default {
   async listEpisodes(ctx, args) {
     const spec = compile(ctx.config, ctx.secrets);
     const lazy = lazyModes.includes(formOf(ctx.config)["play.mode"]);
-    const page = await generic.listEpisodes(withSpec(ctx, spec), args);
-    page.episodes = page.episodes.map(e => ({ ...e, playback: e.playback?.url ? e.playback : lazy ? { lazy: true } : null }));
+    const source = args.source;
+    const page = await generic.listEpisodes(withSpec(ctx, spec), { ...args, source: { ...source, externalId: rawId(source) } });
+    page.episodes = page.episodes.map(e => ({
+      ...e,
+      id: e.id == null || e.id === "" ? e.id : `${source.externalId}/${e.id}`,
+      playback: e.playback?.url ? e.playback : lazy ? { lazy: true } : null
+    }));
     return page;
   },
 
@@ -260,8 +271,8 @@ export default {
     const mode = form["play.mode"];
     if (mode === "direct") throw new ProviderError("El método directo usa la URL del catálogo, y este título no la trae.");
     const vars = {
-      id: episode ? episode.externalId : source?.externalId ?? "",
-      seriesId: episode ? source?.externalId ?? "" : "",
+      id: episode ? rawId(episode) : source ? rawId(source) : "",
+      seriesId: episode && source ? rawId(source) : "",
       season: episode?.season ?? "",
       episode: episode?.number ?? "",
       number: episode?.number ?? "",

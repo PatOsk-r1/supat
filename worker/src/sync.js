@@ -55,7 +55,7 @@ export async function activeJob(env, providerId) {
 }
 
 // Crea un trabajo. Si ya hay uno activo para ese proveedor, devuelve ese (no se duplican).
-export async function createJob(env, provider, { mode = "incremental", trigger = "manual", actor = "" } = {}) {
+export async function createJob(env, provider, { mode = "incremental", trigger = "manual", actor = "", allowRemovals = false } = {}) {
   const current = await activeJob(env, provider.id);
   if (current) return { job: current, existing: true };
   const def = ADAPTERS[provider.adapter];
@@ -65,7 +65,7 @@ export async function createJob(env, provider, { mode = "incremental", trigger =
   const incremental = mode === "incremental" && def?.supportsIncremental?.(config);
   const since = incremental ? provider.last_sync_at - INCREMENTAL_MARGIN_MS : null;
   const now = Date.now();
-  const cursor = { phase: "items", kinds: def ? kindsOf(def, config) : [], ki: 0, cursor: null };
+  const cursor = { phase: "items", kinds: def ? kindsOf(def, config) : [], ki: 0, cursor: null, ...(allowRemovals ? { allowRemovals: true } : {}) };
   const res = await env.DB.prepare("INSERT INTO sync_jobs (provider_id, mode, status, cursor_json, since, next_run_at, trigger, created_by, created_at) VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?) RETURNING *")
     .bind(provider.id, mode, JSON.stringify(cursor), since, now, trigger, actor, now).first();
   await log(env, "info", "sync", `Trabajo ${res.id} creado (${mode === "full" ? "importación completa" : incremental ? "incremental" : "actualización (el proveedor no permite pedir solo cambios)"}, ${trigger}).`, { providerId: provider.id, jobId: res.id });
@@ -175,7 +175,17 @@ export async function runJobStep(baseEnv, job, { fetchImpl = fetch, pages = Numb
         const finished = Date.now();
         const statements = [];
         if (j.mode === "full") {
-          statements.push(env.DB.prepare("UPDATE title_sources SET removed = 1 WHERE provider_id = ? AND removed = 0 AND seen_at < ?").bind(provider.id, j.started_at));
+          // Protección: si faltarían más del 10% de los títulos activos (y más de 20), no se dan de
+          // baja: lo más probable es una respuesta incompleta de la fuente. Se confirman reiniciando
+          // la importación con "allowRemovals".
+          const { active, missing } = await env.DB.prepare(`SELECT SUM(removed = 0) AS active, SUM(removed = 0 AND seen_at < ?) AS missing FROM title_sources WHERE provider_id = ?`)
+            .bind(j.started_at, provider.id).first() || {};
+          const suspicious = (missing > 20 && missing > (active || 0) * 0.1) || (missing > 0 && j.seen === 0);
+          if (suspicious && !cursor.allowRemovals) {
+            await log(env, "warn", "sync", `Trabajo ${j.id}: la fuente no devolvió ${missing} de ${active} títulos; no se marcaron como no disponibles por precaución. Si las bajas son reales, reiniciá la importación confirmando las bajas.`, { providerId: provider.id, jobId: j.id });
+          } else {
+            statements.push(env.DB.prepare("UPDATE title_sources SET removed = 1 WHERE provider_id = ? AND removed = 0 AND seen_at < ?").bind(provider.id, j.started_at));
+          }
         }
         statements.push(env.DB.prepare("UPDATE providers SET last_sync_at = ?, last_status = 'ok', last_error = '', updated_at = ? WHERE id = ?").bind(j.started_at, finished, provider.id));
         await env.DB.batch(statements);

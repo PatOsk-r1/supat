@@ -327,13 +327,13 @@ export const sourcesAdminRoutes = {
   "POST /api/admin/sources/:slot/restart": async ({ env, request, user, params, fetchImpl }) => {
     const slot = slotOf(params);
     const row = await requireRow(env, slot);
-    const { confirm } = await readJson(request);
+    const { confirm, allowRemovals } = await readJson(request);
     if (confirm !== true) fail(400, "Reiniciar la importación necesita confirmación.");
     if (!row.enabled) fail(409, `Activá ${slot.label} antes de importar.`);
     const current = await activeJob(env, slot.id);
     if (current) await cancelJob(env, current.id);
-    const { job } = await createJob(env, row, { mode: "full", trigger: "manual", actor: user.uid });
-    await audit(env, user.uid, "sync-restart", slot.id, `Trabajo ${job.id}${current ? ` (cancelado ${current.id})` : ""}`);
+    const { job } = await createJob(env, row, { mode: "full", trigger: "manual", actor: user.uid, allowRemovals: allowRemovals === true });
+    await audit(env, user.uid, "sync-restart", slot.id, `Trabajo ${job.id}${current ? ` (cancelado ${current.id})` : ""}${allowRemovals === true ? ", con bajas confirmadas" : ""}`);
     await runPending(env, { fetchImpl, jobId: job.id });
     return { source: await view(env, params.slot) };
   },

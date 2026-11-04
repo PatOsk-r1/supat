@@ -71,6 +71,8 @@ episodes, episode_sources) → app (búsqueda, fichas, reproductor)
 - **Recorrido:** sigue todas las páginas de cada endpoint, por tandas: una por minuto con el cron, o "Continuar" en el panel. Se detiene antes de los límites del plan gratuito y sigue donde quedó.
 - **Protección contra páginas repetidas:** si una API ignora el parámetro de página y devuelve lo mismo, el endpoint se corta. Para endpoints sin paginación hay que elegir "Sin paginación".
 - **Reintentos:** se usan los de cada fuente, con espera que se duplica. Los errores 4xx fallan enseguida.
+- **Protección de bajas:** si una importación completa "termina", pero faltarían más del 10% de los títulos (y más de 20), o no llegó nada, no se marca ninguna baja y queda registrado. Si las bajas son reales, se confirman con **Reiniciar y confirmar bajas**.
+- **IDs guardados:** llevan prefijo por tipo (títulos) y por serie (episodios), para que no choquen IDs repetidos de la fuente. El ID original se usa igual en rutas y plantillas.
 - **Errores:** nunca se borra ni se oculta contenido por un error. Las bajas se marcan solo al terminar bien una importación completa, y un título sigue visible mientras otra fuente lo tenga.
 - **Duplicados:** se unen por TMDb, después por IMDb y después por el id de la misma fuente. **Nunca por título.** Los datos del título los define la fuente que lo creó; las demás solo completan lo que falta.
 

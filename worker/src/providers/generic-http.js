@@ -217,7 +217,7 @@ function mapFields(row, map, prefixes = {}) {
   for (const [key, path] of Object.entries(map || {})) {
     let value = key.startsWith("=") ? path : pick(row, path);
     const name = key.replace(/^=/, "");
-    if (value !== undefined && prefixes[name] && typeof value === "string" && !/^https?:/i.test(value)) value = prefixes[name] + value;
+    if (prefixes[name] && typeof value === "string" && value.trim() !== "" && !/^https?:/i.test(value)) value = prefixes[name] + value;
     if (name.startsWith("data.")) out.data[name.slice(5)] = value;
     else if (name.startsWith("playback.")) out.playback[name.slice(9)] = value;
     else out[name] = value;
