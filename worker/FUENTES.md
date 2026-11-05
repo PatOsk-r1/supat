@@ -75,7 +75,7 @@ Detalle y verificación de cada punto: [docs/INFORME-ETAPA-PREPARACION.md](../do
 - **Dónde quedan:** se guardan cifradas con AES-GCM (`SECRETS_KEY`) y **nunca vuelven** al navegador. Ajustes solo muestra "Configurada" y, de los encabezados o parámetros personalizados, los **nombres**.
 - **Qué se tapa:** errores, registros, auditoría y pruebas tapan los valores secretos.
 - **Cómo se cambian:** dejarlas vacías al guardar las conserva; "Borrar la guardada" las quita.
-- **Credencial de reproducción:** se usa solo para obtener o habilitar enlaces, nunca en las consultas del catálogo. Si la fuente exige que vaya **dentro de la URL que usa el navegador**, hay que elegirlo explícitamente ("Dentro de la URL que usa el navegador"). En ese caso **queda visible en el navegador**: no hay forma de ocultar una credencial que el navegador necesita para pedir el video, y la prueba de reproducción lo avisa.
+- **Credencial de reproducción:** se usa solo en el servidor para obtener o habilitar enlaces, nunca en las consultas del catálogo. Si la fuente exige que vaya **dentro de la URL que usa el navegador**, la fuente es **NO COMPATIBLE** con reproducción directa: no se admite ni se "esconde".
 - **Enlaces rechazados:** cualquier otra credencial que aparezca en un enlace hace que el enlace se rechace.
 - **Dominios permitidos:** si se cargan, los enlaces de otros dominios se rechazan. Para un reproductor externo son obligatorios.
 
@@ -87,7 +87,7 @@ Detalle y verificación de cada punto: [docs/INFORME-ETAPA-PREPARACION.md](../do
 - **Protección de bajas:** si una importación completa "termina", pero faltarían más del 10% de los títulos (y más de 20), o no llegó nada, no se marca ninguna baja y queda registrado. Si las bajas son reales, se confirman con **Reiniciar y confirmar bajas**.
 - **IDs guardados:** llevan prefijo por tipo (títulos) y por serie (episodios), para que no choquen IDs repetidos de la fuente. El ID original se usa igual en rutas y plantillas.
 - **Errores:** nunca se borra ni se oculta contenido por un error. Las bajas se marcan solo al terminar bien una importación completa, y un título sigue visible mientras otra fuente lo tenga.
-- **Duplicados:** se unen por TMDb, después por IMDb y después por el id de la misma fuente. **Nunca por título.** Los datos del título los define la fuente que lo creó; las demás solo completan lo que falta.
+- **Duplicados:** se unen por TMDb, después por IMDb y después por el id de la misma fuente. **Nunca por título.** Qué fuente manda en cada dato se elige en Ajustes → Prioridad de datos (un dato vacío nunca borra uno existente).
 
 ## Reproductor
 
