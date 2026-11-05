@@ -221,6 +221,22 @@ Una API que ignora el parámetro de página hacía que la importación pidiera p
 
 Detalle: [docs/INFORME-ETAPA-PREPARACION.md](docs/INFORME-ETAPA-PREPARACION.md).
 
+## 11. Etapa de validación (2026-11-05)
+
+**121 pruebas: 115 aprobadas, 0 fallidas y 6 omitidas** (las de integración real). La compilación funciona.
+
+- **Cloudflare local:**
+  - qué hacer: levantar `npm run api:dev` y `node tests/helpers/servidor-validacion.mjs`, y después correr `node tests/validacion-local.mjs`;
+  - qué cubre: migraciones, paginación mezclada, estado parcial, bajas de episodios, espera por 429, prioridades, estado fallida y auditoría sin credenciales;
+  - resultado: todo pasó, en dos corridas seguidas.
+- **Navegador:**
+  - pantallas de Ajustes y prioridades (guardar, vista previa, continuar), con la sesión de propietario;
+  - para no tocar otros emuladores que estén en uso: `npm run emuladores:alt` (puertos 9199 y 8180), más `VITE_EMU_AUTH` y `VITE_EMU_FIRESTORE` en un `.env.emulador.local` temporal, más `SUPAT_EMU_AUTH` para `npm run cuenta:local`.
+- **Corregido:** los cambios sin guardar de un formulario se perdían si la pantalla se redibujaba.
+- **No se corrió** `npm run test:reglas`: usa los puertos por defecto de los emuladores, que estaban en uso por otra sesión, y las reglas no cambiaron.
+
+Detalle: [docs/INFORME-ETAPA-VALIDACION.md](docs/INFORME-ETAPA-VALIDACION.md).
+
 ## 6. No verificado
 
 - Pantalla completa: el navegador integrado de la app no la permite; el código maneja el rechazo. Falta probar en Chrome/Edge.

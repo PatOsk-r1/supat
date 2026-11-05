@@ -28,8 +28,12 @@ export function getFirebase() {
     auth.languageCode = "es";
     const db = F.getFirestore(app);
     if (useEmulator) {
-      A.connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
-      F.connectFirestoreEmulator(db, "127.0.0.1", 8080);
+      // Puertos por defecto de firebase.json; VITE_EMU_AUTH / VITE_EMU_FIRESTORE permiten usar un segundo
+      // juego de emuladores (firebase.emu-alt.json) sin tocar otros que estén corriendo.
+      const authUrl = import.meta.env?.VITE_EMU_AUTH || "http://127.0.0.1:9099";
+      const [fsHost, fsPort] = String(import.meta.env?.VITE_EMU_FIRESTORE || "127.0.0.1:8080").split(":");
+      A.connectAuthEmulator(auth, authUrl, { disableWarnings: true });
+      F.connectFirestoreEmulator(db, fsHost, Number(fsPort));
     }
     return { auth, db, A, F };
   })();

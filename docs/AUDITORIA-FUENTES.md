@@ -14,6 +14,38 @@
 >
 > **Sigue pendiente** (punto 1 de este documento): valores constantes, transformaciones, combinar campos, consulta de detalle por título, episodios dentro de la serie, temporadas con ID interno, endpoints con tipos mezclados, OAuth y firmas.
 >
+> **Validación 2026-11-05** ([INFORME-ETAPA-VALIDACION.md](INFORME-ETAPA-VALIDACION.md)), siempre con datos simulados:
+> - **Probado en Cloudflare local** (workerd + D1, `tests/validacion-local.mjs`):
+>   - migraciones 0001–0005;
+>   - paginación mezclada;
+>   - estado parcial sin bajas;
+>   - bajas de episodios solo en importaciones completas;
+>   - espera por 429/`Retry-After` guardada en D1;
+>   - prioridades: vista previa, confirmación y aplicación;
+>   - estado fallida;
+>   - auditoría sin credenciales.
+> - **Probado en el navegador:** las pantallas nuevas de Ajustes (estados, campos por endpoint, límites, inicio de sesión, herramientas y prioridades con guardar, vista previa y continuar) y el selector de subtítulos. Se corrigió que los cambios sin guardar se perdían al redibujarse la pantalla.
+> - **Solo revisado en código:**
+>   - token de inicio de sesión con un servidor real;
+>   - enlace de video vencido;
+>   - subtítulos sin CORS;
+>   - cron programado.
+> - **Pendiente de integración real:** todo lo que necesita las fuentes reales.
+> - **Pruebas automáticas:** 121, con 115 que pasan, 0 que fallan y 6 omitidas, que son las de integración real.
+>
+> **Limitaciones que siguen** y necesitan código específico:
+> - datos constantes y transformaciones;
+> - consultas adicionales de detalle por título;
+> - episodios incluidos dentro de la respuesta de una serie;
+> - temporadas con ID interno;
+> - endpoints con tipos mezclados;
+> - respuestas que no son JSON;
+> - OAuth, `refresh_token`, firmas, captcha e inicio de sesión aparte para reproducir;
+> - fin de lista ambiguo cuando la fuente no da el total ni la última página;
+> - cualquier otra estructura o autenticación fuera del configurador.
+>
+> La credencial en la URL del video sigue siendo **NO COMPATIBLE**.
+>
 > Las tablas de abajo describen el estado **del 2026-11-04**.
 
 Se revisó el código, no solo la documentación. Cada afirmación está marcada:

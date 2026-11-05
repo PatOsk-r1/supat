@@ -2,7 +2,8 @@
 // para entrar a la app local (npm run dev:emu) y cargar la fuente en Ajustes.
 // Solo funciona con los emuladores (npm run emuladores): no toca cuentas reales.
 // worker/.dev.vars tiene que incluir OWNER_UIDS="e2e-dueno".
-const AUTH = "http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1";
+// SUPAT_EMU_AUTH: otro emulador (por ejemplo http://127.0.0.1:9199 con firebase.emu-alt.json).
+const AUTH = `${process.env.SUPAT_EMU_AUTH || "http://127.0.0.1:9099"}/identitytoolkit.googleapis.com/v1`;
 const EMAIL = "dueno@prueba.test";
 const PASSWORD = "clave-de-prueba-1234"; // contraseña de prueba del emulador local
 

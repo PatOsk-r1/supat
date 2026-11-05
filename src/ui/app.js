@@ -111,6 +111,7 @@ export function startApp(app, extensions = {}) {
       ? { title: "Cargando", html: `<div class="empty" role="status"><div class="xp-spinner"></div>Cargando catálogo…</div>` }
       : pickView();
     view.innerHTML = result.html;
+    restoreDrafts();
     document.title = `${result.title} · Supat`;
     if (result.mount) cleanup = result.mount(view, ctx) || (() => {});
 
@@ -119,6 +120,33 @@ export function startApp(app, extensions = {}) {
     else if (focusHeading) (view.querySelector("h1") || view).focus({ preventScroll: true });
   }
   ctx.render = render;
+
+  // Borradores de los formularios largos de Ajustes (fuentes y prioridades): la pantalla se vuelve a
+  // dibujar sola (catálogo, sesión, avance de importaciones) y no debe perder lo que se está editando.
+  const DRAFT_FORMS = ["source-slot", "priorities"];
+  const drafts = new Map(); // "form:slot" → { campo: valor }
+  const draftKey = form => `${form.dataset.form}:${form.dataset.slot || ""}`;
+  function rememberDraft(el) {
+    const form = el.closest?.("form");
+    if (!form || !DRAFT_FORMS.includes(form.dataset.form) || !el.name) return;
+    const key = draftKey(form);
+    if (!drafts.has(key)) drafts.set(key, {});
+    drafts.get(key)[el.name] = el.type === "checkbox" ? el.checked : el.value;
+  }
+  function restoreDrafts() {
+    for (const [key, values] of drafts) {
+      const [name, slot] = key.split(":");
+      const form = view.querySelector(`form[data-form="${name}"]${slot ? `[data-slot="${slot}"]` : ""}`);
+      if (!form) continue;
+      for (const [field, value] of Object.entries(values)) {
+        const el = form.elements[field];
+        if (!el || el.type === "file") continue;
+        if (el.type === "checkbox") el.checked = Boolean(value); else el.value = value;
+      }
+    }
+  }
+  const clearDraft = form => drafts.delete(draftKey(form));
+  app.addEventListener("input", ev => rememberDraft(ev.target));
 
   // ---------- catálogo central: datos del panel del propietario ----------
   const centralLoaders = {
@@ -418,6 +446,7 @@ export function startApp(app, extensions = {}) {
 
   app.addEventListener("change", async ev => {
     const el = ev.target;
+    rememberDraft(el);
     if (el.dataset.action === "central-log-level") { state.central.logLevel = el.value; delete state.central.data.logs; ctx.loadCentral("registros"); return; }
     if (el.dataset.action === "filter-select") { state.filters[el.dataset.name] = el.value; state.filters.limit = 0; render(); return; }
     if (el.dataset.setting) { settings.set(el.dataset.setting, el.type === "checkbox" ? el.checked : el.value); return; }
@@ -430,6 +459,7 @@ export function startApp(app, extensions = {}) {
     if (form.dataset.form === "priorities") {
       run(async () => {
         await centralAdmin.savePriorities(priorityForm());
+        clearDraft(form);
         state.formMessage = "Prioridades guardadas SIN aplicar: los datos del catálogo no cambiaron. Usá la vista previa y después \"Aplicar a todo el catálogo\".";
         await ctx.loadPriorities({ quiet: true });
       });
@@ -439,6 +469,7 @@ export function startApp(app, extensions = {}) {
       const slot = form.dataset.slot;
       run(async () => {
         const { source } = await centralAdmin.saveSource(slot, sourceSlotBody(form));
+        clearDraft(form);
         setSlot(slot, source);
         state.formMessage = source.missingToActivate.length
           ? `Configuración guardada. Para activar e importar todavía falta: ${source.missingToActivate.join(", ")}.`
