@@ -32,7 +32,7 @@ export function expandSecrets(secrets = {}) {
 function authEntries(form, secrets) {
   const auth = [];
   const type = form.authType || "none";
-  if (type === "apiKeyHeader") auth.push({ in: "header", name: str(form.apiKeyName), value: "{apiKey}" });
+  if (type === "apiKeyHeader") auth.push({ in: "header", name: str(form.apiKeyName), value: `${String(form.apiKeyPrefix ?? "").replace(/[{}]/g, "")}{apiKey}` });
   if (type === "apiKeyQuery") auth.push({ in: "query", name: str(form.apiKeyName), value: "{apiKey}" });
   if (type === "bearer") auth.push({ in: "header", name: "Authorization", value: "Bearer {token}" });
   if (type === "basic") auth.push({ in: "basic" });

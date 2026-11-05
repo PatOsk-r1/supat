@@ -46,6 +46,16 @@ function endpoint(key, label, extra = "") {
 
 export const SECTIONS = [
   {
+    // Modo simple: las direcciones de ejemplo que pegó el propietario (sin la clave). No se dibuja con
+    // las secciones avanzadas: lo usa la detección automática.
+    id: "simple", title: "Configuración simple", simple: true,
+    fields: [
+      { key: "simple.movieUrl", label: "Dirección de películas", type: "text" },
+      { key: "simple.seriesUrl", label: "Dirección de series", type: "text" },
+      { key: "simple.episodesUrl", label: "Dirección de episodios de una serie", type: "text" }
+    ]
+  },
+  {
     id: "conexion", title: "Identificación y conexión",
     fields: [
       { key: "internalName", label: "Nombre interno", type: "text", help: "Solo para vos (registros y panel)." },
@@ -80,6 +90,7 @@ export const SECTIONS = [
       { key: "login.header", label: "Encabezado donde va el token", type: "text", placeholder: "Authorization" },
       { key: "login.prefix", label: "Prefijo del token", type: "text", placeholder: "Bearer " },
       { key: "apiKeyName", label: "Nombre del encabezado o parámetro de la API Key", type: "text" },
+      { key: "apiKeyPrefix", label: "Prefijo de la API Key en el encabezado", type: "text", help: 'Texto que va antes de la clave, por ejemplo "Bearer " (con el espacio). Vacío = solo la clave.' },
       { key: "apiKey", label: "API Key", type: "secret" },
       { key: "token", label: "Token", type: "secret" },
       { key: "username", label: "Usuario", type: "secret" },

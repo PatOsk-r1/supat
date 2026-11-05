@@ -123,7 +123,7 @@ export function startApp(app, extensions = {}) {
 
   // Borradores de los formularios largos de Ajustes (fuentes y prioridades): la pantalla se vuelve a
   // dibujar sola (catálogo, sesión, avance de importaciones) y no debe perder lo que se está editando.
-  const DRAFT_FORMS = ["source-slot", "priorities"];
+  const DRAFT_FORMS = ["source-slot", "source-simple", "priorities"];
   const drafts = new Map(); // "form:slot" → { campo: valor }
   const draftKey = form => `${form.dataset.form}:${form.dataset.slot || ""}`;
   function rememberDraft(el) {
@@ -355,6 +355,30 @@ export function startApp(app, extensions = {}) {
     })),
     "prio-continue": () => run(async () => { await centralAdmin.continuePriorities(); await ctx.loadPriorities({ quiet: true }); }),
     // ---------- fuentes de contenido (Ajustes, propietario) ----------
+    // Modo simple: guarda lo que encontró "Detectar". La API Key es la que se escribió, o la que venía
+    // dentro de la dirección pegada (se manda aparte y se guarda cifrada; la dirección se guarda sin ella).
+    "src-detect-use": el => {
+      const slot = el.dataset.slot;
+      const found = state.sources.results?.[slot]?.detect;
+      const simple = app.querySelector(`form[data-form="source-simple"][data-slot="${slot}"]`);
+      if (!found?.ok || !simple) return;
+      let key = simple.elements.apiKey?.value.trim() || "";
+      if (!key && found.keyParam) {
+        for (const name of ["movieUrl", "seriesUrl", "episodesUrl"]) {
+          try { key = new URL(simple.elements[name]?.value.trim()).searchParams.get(found.keyParam) || ""; } catch { /* sin dirección */ }
+          if (key) break;
+        }
+      }
+      run(async () => {
+        const { source } = await centralAdmin.saveSource(slot, { form: found.form, secrets: key ? { apiKey: key } : {} });
+        clearDraft(simple);
+        setSlot(slot, source);
+        setResult(slot, "detect", null);
+        state.formMessage = source.missingToActivate.length
+          ? `Configuración guardada. Para activar todavía falta: ${source.missingToActivate.join(", ")}.`
+          : "Configuración guardada. Probá la reproducción y después tocá \"Activar\" e \"Iniciar importación\".";
+      });
+    },
     "src-act": el => {
       const { slot, act } = el.dataset;
       const kindOf = attr => app.querySelector(`[${attr}="${slot}"]`)?.value;
@@ -397,7 +421,10 @@ export function startApp(app, extensions = {}) {
   // Tarjeta de una fuente → { form, secrets, clearSecrets }. Las credenciales vacías no se mandan (se conservan).
   function sourceSlotBody(formEl) {
     const form = {}, secrets = {}, clearSecrets = [];
+    const saved = state.sources?.data?.[formEl.dataset.slot]?.form || {};
     for (const f of ALL_FIELDS) {
+      // Campos que no están en este formulario (los del modo simple): se conserva lo guardado.
+      if (!formEl.elements[f.key] && f.type !== "secret" && f.type !== "secretkv") { if (f.key in saved) form[f.key] = saved[f.key]; continue; }
       if (f.type === "secret" || f.type === "secretkv") {
         const v = formEl.elements[`secret:${f.key}`]?.value || "";
         if (v.trim()) secrets[f.key] = f.type === "secret" ? v.trim() : v;
@@ -463,6 +490,13 @@ export function startApp(app, extensions = {}) {
         state.formMessage = "Prioridades guardadas SIN aplicar: los datos del catálogo no cambiaron. Usá la vista previa y después \"Aplicar a todo el catálogo\".";
         await ctx.loadPriorities({ quiet: true });
       });
+      return;
+    }
+    if (form.dataset.form === "source-simple") {
+      const slot = form.dataset.slot;
+      const body = Object.fromEntries(["displayName", "movieUrl", "seriesUrl", "episodesUrl", "apiKey", "keyHeader"].map(k => [k, String(data[k] ?? "").trim()]));
+      if (!body.displayName) { state.formError = "Escribí el nombre visible de la fuente."; render(); return; }
+      run(async () => { setResult(slot, "detect", await centralAdmin.sourceAction(slot, "detect", body)); });
       return;
     }
     if (form.dataset.form === "source-slot") {

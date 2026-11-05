@@ -64,6 +64,53 @@ function result(r) {
   return `<p class="note ${r.ok ? "ok" : "form-error"}" role="status">${r.ok ? "✔" : "✖"} ${e(r.message)}${r.sample?.length ? ` · Ejemplos: ${e(r.sample.join(", "))}` : ""}${r.coverage ? `<br><small>Campos encontrados (de ${r.total}): ${Object.entries(r.coverage).map(([k, n]) => `${e(k)} ${n}`).join(" · ")}</small>` : ""}</p>`;
 }
 
+// Resultado de "Detectar": qué encontró, la prueba con el código real de importación y los avisos.
+function detection(slot, d, busy) {
+  if (!d) return "";
+  if (!d.ok) return `<p class="note form-error" role="alert">✖ ${e(d.message)}</p>`;
+  const r = d.report;
+  const KIND = { movie: "Películas", series: "Series", episodes: "Episodios" };
+  const checks = Object.entries(r.check).map(([k, c]) => `<li><strong>${KIND[k]}:</strong> ${c.valid} de ${c.received} válidos${c.samples.length ? ` · ${e(c.samples.join(", "))}` : ""}${r.coverage[k] ? `<br><small>Con dato: ${Object.entries(r.coverage[k]).map(([f, n]) => `${e(f)} ${n}`).join(" · ")}</small>` : ""}</li>`).join("");
+  const lists = Object.entries(r.lists).map(([k, l]) => `<li>${KIND[k]}: lista en <code>${e(l.path)}</code> · ${e(l.paging)}</li>`).join("");
+  const ok = Object.values(r.check).some(c => c.valid > 0);
+  return `<div class="detect-result" role="status">
+    <p class="note ${ok ? "ok" : "form-error"}">${ok ? "✔ Detectado." : "✖ Se leyó la respuesta, pero ningún título quedó válido."} ${e(r.auth)}</p>
+    <ul class="detect-list">${checks}</ul>
+    <details><summary>Ver qué se detectó</summary>
+      <ul class="detect-list">${lists}
+        <li>Campos: ${r.fields.map(f => `${e(f.label)} = <code>${e(f.path)}</code>`).join(" · ")}</li>
+        ${r.episodes ? `<li>Episodios: <code>${e(r.episodes.path)}</code> · ${e(r.episodes.fields.join(" · "))}</li>` : ""}
+        <li>Reproducción: ${e(r.playback)}</li>
+      </ul></details>
+    ${d.notes?.length ? `<ul class="detect-list">${d.notes.map(n => `<li>${e(n)}</li>`).join("")}</ul>` : ""}
+    ${d.warnings?.length ? `<ul class="detect-list detect-warn">${d.warnings.map(w => `<li>⚠ ${e(w)}</li>`).join("")}</ul>` : ""}
+    ${ok ? `<div class="form-actions"><button type="button" class="primary" data-action="src-detect-use" data-slot="${slot}" ${busy}>Usar esta configuración</button></div>
+      <p class="note">Se guarda la configuración (la API Key, cifrada). Después: "Probar reproducción", "Activar" e "Iniciar importación".</p>` : ""}
+  </div>`;
+}
+
+function simpleForm(slot, src, res, busy) {
+  const f = src.form || {};
+  const keySet = src.secretsSet?.includes("apiKey") || src.secretsSet?.includes("token");
+  const input = (name, label, value, help, extra = "") => `<div class="field"><label for="simple-${slot}-${name}">${label}</label>
+    <input id="simple-${slot}-${name}" name="${name}" type="text" value="${e(value || "")}" autocomplete="off" spellcheck="false" ${help ? `aria-describedby="simple-${slot}-${name}-h"` : ""} ${extra}>
+    ${help ? `<small id="simple-${slot}-${name}-h">${help}</small>` : ""}</div>`;
+  return `<form class="provider-form source-simple" data-form="source-simple" data-slot="${slot}" novalidate>
+    <p class="note">Pegá las direcciones tal como las usás con tu API Key (por ejemplo la que probaste en PowerShell) y tocá "Detectar". Supat busca solo dónde están los títulos, qué es cada dato y cómo se pasa de página.</p>
+    ${input("displayName", "Nombre visible *", f.displayName, "Lo ven los usuarios al elegir la fuente.")}
+    ${input("movieUrl", "Dirección de películas", f["simple.movieUrl"], "Completa, con https://. Puede incluir la clave: se saca de la dirección y se guarda cifrada.")}
+    ${input("seriesUrl", "Dirección de series (opcional)", f["simple.seriesUrl"], "")}
+    ${input("episodesUrl", "Dirección de episodios de una serie (opcional)", f["simple.episodesUrl"], "La dirección de los episodios de UNA serie, con su ID real. Supat reconoce qué parte es la serie.")}
+    <div class="field"><label for="simple-${slot}-apiKey">API Key</label>
+      <input id="simple-${slot}-apiKey" name="apiKey" type="password" autocomplete="new-password" spellcheck="false" placeholder="${keySet ? "Configurada · dejá vacío para conservarla" : "Pegala acá (o dentro de la dirección)"}"></div>
+    <details><summary>¿La clave va en un encabezado especial?</summary>
+      ${input("keyHeader", "Nombre del encabezado", f.authType === "apiKeyHeader" ? f.apiKeyName : "", "Solo si la documentación lo indica (por ejemplo X-Api-Key). Vacío = Supat lo prueba solo.")}
+    </details>
+    <div class="form-actions"><button type="submit" class="primary" ${busy}>Detectar</button></div>
+  </form>
+  ${detection(slot, res.detect, busy)}`;
+}
+
 function card(ctx, slot) {
   const st = ctx.state.sources;
   const src = st.data[slot];
@@ -81,7 +128,7 @@ function card(ctx, slot) {
     <header class="provider-head"><div>
       <h3 id="h-src-${slot}">${e(SLOTS[slot].label)}${src.form?.displayName ? ` · ${e(src.form.displayName)}` : ""}
         ${src.enabled ? `<span class="badge badge-on">Activa</span>` : `<span class="badge badge-off">Inactiva</span>`}</h3>
-      <p class="provider-origin">${src.configured ? `Última sincronización completa: ${dateText(src.lastSyncAt)} · ${c.movie || 0} películas · ${c.series || 0} series · ${c.anime || 0} anime · ${c.episodes || 0} episodios` : "Sin configurar: completá los campos y guardá."}</p>
+      <p class="provider-origin">${src.configured ? `Última sincronización completa: ${dateText(src.lastSyncAt)} · ${c.movie || 0} películas · ${c.series || 0} series · ${c.anime || 0} anime · ${c.episodes || 0} episodios` : "Sin configurar: pegá la dirección y la API Key abajo y tocá \"Detectar\"."}</p>
       ${src.configured ? `<div class="genres provider-caps">${caps.map(cp => `<span class="genre ${cp.supported ? "cap" : "cap-off"}" title="${cp.supported ? "Configurado" : "No soportado o sin configurar"}">${cp.supported ? "✔" : "—"} ${e(cp.label)}</span>`).join("")}</div>` : ""}
     </div></header>
 
@@ -109,14 +156,19 @@ function card(ctx, slot) {
     ${result(res.connection)}${result(res.catalog)}${result(res.playback)}
     ${errors ? `<div class="source-errors"><strong>Errores y avisos recientes</strong>${errors.length ? `<ul class="history logs">${errors.map(l => `<li class="log-${e(l.level)}"><span>${e(l.message)}</span><small>${dateText(l.at)} · ${e(l.scope)}${l.jobId ? ` · trabajo ${l.jobId}` : ""}</small></li>`).join("")}</ul>` : `<p class="note">No hay errores registrados.</p>`}</div>` : ""}
 
+    ${simpleForm(slot, src, res, busy)}
+
+    <details class="source-advanced"><summary>Configuración avanzada (opcional)</summary>
+    <p class="note">Todos los campos que completó la detección, para corregir algo puntual o para fuentes que no se detectan solas.</p>
     <form class="provider-form source-form" data-form="source-slot" data-slot="${slot}" novalidate>
-      ${SECTIONS.map((sec, i) => `<details class="source-section" ${!src.configured && i < 2 ? "open" : ""}><summary>${e(sec.title)}</summary>
+      ${SECTIONS.filter(sec => !sec.simple).map(sec => `<details class="source-section"><summary>${e(sec.title)}</summary>
         ${sec.fields.map(f => field(slot, f, src)).join("")}
         ${(sec.groups || []).map(g => `<fieldset class="source-group"><legend>${e(g.title)}</legend>${g.fields.map(f => field(slot, f, src)).join("")}</fieldset>`).join("")}
       </details>`).join("")}
       <div class="form-actions"><button type="submit" class="primary" ${busy}>Guardar configuración</button></div>
       <p class="note">Las credenciales se guardan cifradas en el servidor y nunca vuelven al navegador. Guardá antes de usar las pruebas.</p>
     </form>
+    </details>
   </article>`;
 }
 

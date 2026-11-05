@@ -237,6 +237,33 @@ Detalle: [docs/INFORME-ETAPA-PREPARACION.md](docs/INFORME-ETAPA-PREPARACION.md).
 
 Detalle: [docs/INFORME-ETAPA-VALIDACION.md](docs/INFORME-ETAPA-VALIDACION.md).
 
+## 12. Modo simple: detección automática (2026-11-05)
+
+**126 pruebas: 120 aprobadas, 0 fallidas, 6 omitidas.** Las omitidas son las de integración real. La compilación funciona.
+
+- **Pruebas nuevas:** `tests/deteccion.test.js`, con 5 pruebas sobre APIs simuladas:
+  - **Lista en `data.result` sin campo `id`** (el caso real que motivó el cambio):
+    - quedan 100 de 100 válidos, con TMDb como ID;
+    - la clave se detecta en la dirección;
+    - la paginación queda por página;
+    - el video directo es `download_url`;
+    - se guarda e importa 300 títulos.
+  - **Clave en un encabezado no indicado:**
+    - Supat prueba Bearer y después `X-API-Key`;
+    - las series usan el enlace siguiente;
+    - los episodios usan `{id}`, y se ignora la duración en minutos;
+    - las imágenes llevan el prefijo de TMDb;
+    - la reproducción usa el reproductor externo.
+  - **Errores claros:**
+    - siempre sin la clave;
+    - solo para el propietario.
+  - **"Probar catálogo":** explica "100 sin ID" y cuenta los campos sobre lo recibido.
+- **Cloudflare local y navegador**, con los emuladores alternativos y la API simulada `tests/helpers/servidor-validacion.mjs`. Se probó la secuencia Detectar → Usar esta configuración → Probar catálogo:
+  - **Detectar:** películas 3/3, series 1/1, episodios 4/4, con la clave en el encabezado `X-Key`;
+  - **Probar catálogo:** 3 válidos.
+
+  La clave no aparece en las respuestas, y la dirección guardada queda sin ella.
+
 ## 6. No verificado
 
 - Pantalla completa: el navegador integrado de la app no la permite; el código maneja el rechazo. Falta probar en Chrome/Edge.

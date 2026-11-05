@@ -40,6 +40,38 @@ episodes, episode_sources) → app (búsqueda, fichas, reproductor)
 - **Rutas dentro de las respuestas JSON:** `a.b`, `a[0].b`, `lista[].nombre`; para alternativas, `a|b`.
 - **Variables en plantillas y parámetros:** `{id}`, `{seriesId}`, `{season}`, `{episode}`, `{tmdb}`, `{imdb}`, `{lang}`, `{data.campo}`.
 
+## Modo simple: detección automática (2026-11-05)
+
+Arriba de cada tarjeta. El propietario completa solo:
+
+- el nombre visible;
+- la dirección de películas, y si existen, la de series y la de episodios de UNA serie;
+- la API Key, en su campo o dentro de la dirección.
+
+Al tocar **Detectar** (`POST /api/admin/sources/:slot/detect`, en `worker/src/providers/detect.js`), el servidor pide la primera página y deduce:
+
+- **Dónde va la clave:** si está en la dirección, se saca de ahí. Si no, se usa el encabezado indicado o se prueban los habituales (`Authorization: Bearer`, `X-API-Key`, `api_key`, `apikey`, `key`…).
+- **La lista de resultados:** la lista de objetos más grande de la respuesta.
+- **Cada campo:** por nombres comunes (`id`, `title`/`name`, `tmdb_id`, `poster`, `overview`…). Sin un ID propio en todos los títulos, se usa TMDb o IMDb.
+- **La paginación de cada endpoint:** página, offset, cursor o enlace. Si no está clara, se pide la página 2 para confirmarla. Cada endpoint queda con su paginación explícita, para que no herede la general.
+- **Los episodios:** se reconoce qué parte de la dirección de ejemplo es la serie y se reemplaza por `{id}`.
+- **Las imágenes con ruta relativa:** con el formato de TMDb, se completa el prefijo de TMDb.
+- **La reproducción**, si cada título trae su enlace: video directo (`.m3u8`, `.mp4`, `.webm`) o reproductor externo con sus dominios.
+
+**Qué devuelve:**
+
+- **Un formulario completo:** el mismo de la configuración avanzada. **No guarda nada**: lo guarda "Usar esta configuración", con el PUT de siempre y la clave aparte.
+- **Una verificación con el código real de importación:** cuántos títulos y episodios quedan válidos y qué datos tiene cada uno.
+- **Avisos:** lo que no pudo deducir.
+
+**La clave:**
+
+- nunca vuelve en la respuesta;
+- las direcciones se guardan sin ella (`simple.*`);
+- los errores la tapan.
+
+"Probar catálogo" ahora cuenta los campos sobre **todo** lo recibido, no solo lo válido, y explica los rechazos, por ejemplo "100 sin ID".
+
 ## Agregado en la etapa de preparación (2026-11-05)
 
 - **Paginación por endpoint:** cada endpoint tiene su propio tipo, parámetro, rutas, máximo de páginas y de registros, y qué hacer ante páginas vacías, repetidas o inválidas. Lo vacío usa la paginación general.

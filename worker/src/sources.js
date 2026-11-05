@@ -12,6 +12,7 @@ import { createJob, runPending, activeJob, cancelJob, setPaused } from "./sync.j
 import { jobOut } from "./admin.js";
 import { SLOTS, SECRET_FIELDS, ALL_FIELDS, FORM_KEYS, parseKv, missingToSave, missingToActivate } from "../../src/shared/fuente-esquema.js";
 import { capabilities, playbackProblems } from "./providers/configurable.js";
+import { detectSource } from "./providers/detect.js";
 
 const ADAPTER = "configurable";
 const SOURCE_IDS = Object.values(SLOTS).map(s => s.id);
@@ -177,6 +178,27 @@ export const sourcesAdminRoutes = {
     return result;
   },
 
+  // Modo simple: con las direcciones de ejemplo y la API Key, deduce la configuración completa.
+  // No guarda nada: devuelve el formulario para revisarlo y guardarlo con "Usar esta configuración".
+  "POST /api/admin/sources/:slot/detect": async ({ env, request, user, params, fetchImpl }) => {
+    const slot = slotOf(params);
+    const body = await readJson(request, 32 * 1024);
+    const input = Object.fromEntries(["displayName", "movieUrl", "seriesUrl", "episodesUrl", "apiKey", "keyHeader"].map(k => [k, String(body[k] ?? "").slice(0, 4000)]));
+    const row = await getRow(env, slot.id);
+    const saved = { form: formOf(row), secrets: await secretsOf(env, row) };
+    const secrets = { apiKey: input.apiKey, savedKey: saved.secrets.apiKey, savedToken: saved.secrets.token };
+    const fetchFn = guardedFetch({ secrets, fetchImpl, budget: { left: 16 }, timeoutMs: 15000 });
+    try {
+      const result = await detectSource({ input, saved, fetch: fetchFn });
+      await audit(env, user.uid, "source-detect", slot.id, `Detección: ${Object.entries(result.report.check).map(([k, c]) => `${k} ${c.valid}/${c.received}`).join(", ")}`);
+      return { ok: true, ...result };
+    } catch (err) {
+      const message = errText(err, secrets);
+      await log(env, "warn", "test", `Detección: ${message}`, { providerId: slot.id, secrets });
+      return { ok: false, message };
+    }
+  },
+
   // Primera página de una categoría, normalizada: cuántos resultados, si hay más páginas y qué
   // campos del mapeo se encontraron. Con "episodes", toma la primera serie y pide sus episodios.
   "POST /api/admin/sources/:slot/test-catalog": async ({ env, request, user, params, fetchImpl }) => {
@@ -200,13 +222,18 @@ export const sourcesAdminRoutes = {
       if (!def.kindsFor(ctx.config).includes(kind)) return { ok: false, message: `La categoría "${kind}" no está configurada (no soportado).` };
       const page = await def.listPage(ctx, { kind, cursor: null });
       const valid = page.items.map(i => normalizeTitle(i, [kind])).filter(Boolean);
-      const has = f => valid.filter(t => (Array.isArray(t[f]) ? t[f].length : t[f])).length;
-      const coverage = { titulo: has("title"), anio: has("year"), poster: has("poster"), backdrop: has("backdrop"), descripcion: has("description"), tmdb: has("tmdb"), imdb: has("imdb") };
+      // Campos encontrados sobre TODO lo recibido (no solo lo válido), y por qué se rechaza lo inválido.
+      const noId = page.items.filter(i => !String(i.id ?? "").trim()).length;
+      const noTitle = page.items.filter(i => !String(Array.isArray(i.title) ? i.title[0] ?? "" : i.title ?? "").trim()).length;
+      const loose = page.items.map(i => normalizeTitle({ ...i, id: "x", title: "x", kind }, [kind])).filter(Boolean);
+      const has = f => loose.filter(t => (Array.isArray(t[f]) ? t[f].length : t[f])).length;
+      const coverage = { id: page.items.length - noId, titulo: page.items.length - noTitle, anio: has("year"), poster: has("poster"), backdrop: has("backdrop"), descripcion: has("description"), tmdb: has("tmdb"), imdb: has("imdb") };
+      const why = [noId && `${noId} sin ID (revisá "ID del contenido")`, noTitle && `${noTitle} sin título (revisá "Título")`].filter(Boolean);
       await audit(env, user.uid, "source-test", slot.id, `Catálogo (${kind}): ${valid.length} válidos`);
       return {
         ok: valid.length > 0,
-        message: `${page.items.length} resultado(s) en la primera página, ${valid.length} válidos; ${page.next ? "hay página siguiente" : "no hay más páginas"}.`,
-        coverage, total: valid.length,
+        message: `${page.items.length} resultado(s) en la primera página, ${valid.length} válidos${why.length && valid.length < page.items.length ? ` (${why.join(", ")})` : ""}; ${page.next ? "hay página siguiente" : "no hay más páginas"}.`,
+        coverage, total: page.items.length,
         sample: valid.slice(0, 3).map(t => redact(t.title, ctx.secrets))
       };
     } catch (err) {

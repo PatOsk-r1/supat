@@ -1,6 +1,11 @@
 GUÍA DE AJUSTES DE SUPAT: CÓMO SE COMPLETA CADA CAMPO DE "FUENTES DE CONTENIDO"
 Versión 2 (2026-11-05). Escrita a partir del código real de Supat: describe lo que el programa HACE con cada campo.
 
+NOTA: desde la versión con "modo simple", en Ajustes alcanza con pegar la dirección de películas
+(y opcionalmente la de series y la de episodios de una serie) más la API Key, y tocar "Detectar".
+Supat completa solo todos los campos de esta guía. Esta guía sirve para la "Configuración avanzada":
+corregir algo puntual o configurar una fuente que no se detecte sola.
+
 ######################################################################
 PARTE 0. INSTRUCCIONES PARA EL ASISTENTE (leer primero)
 ######################################################################
