@@ -6,6 +6,7 @@
 // especificaciones escritas a mano.
 import { validateAdapter, secretFields, guardedFetch, KINDS } from "./contract.js";
 import { decryptSecrets } from "../secrets.js";
+import { loadState, saveState, makeGate, makeSession } from "../provider-state.js";
 import genericHttp from "./generic-http.js";
 import configurable from "./configurable.js";
 
@@ -57,5 +58,13 @@ export async function contextFor(env, row, { fetchImpl = fetch, budget } = {}) {
   if (def.minIntervalMs) minIntervalMs = def.minIntervalMs(config);
   else try { minIntervalMs = Math.min(10000, Math.max(0, Number(JSON.parse(config.spec || "{}").minIntervalMs) || 0)); } catch { /* sin especificación */ }
   const timeoutMs = def.timeoutMs ? def.timeoutMs(config) : undefined;
-  return { def, ctx: { config, secrets, providerId: row.id, fetch: guardedFetch({ secrets, minIntervalMs, timeoutMs, fetchImpl, budget }) } };
+  // Límite de frecuencia y sesión persistentes (si el adaptador los define).
+  const rate = def.rateConfig ? def.rateConfig(config) : null;
+  const state = rate || def.loginConfig?.(config) ? await loadState(env, row.id) : null;
+  const gate = rate ? makeGate(state, rate) : null;
+  const fetchFn = guardedFetch({ secrets, minIntervalMs, timeoutMs, fetchImpl, budget, gate });
+  const login = def.loginConfig?.(config);
+  const ctx = { config, secrets, providerId: row.id, fetch: fetchFn, state, saveState: () => (state ? saveState(env, state) : null) };
+  if (login) ctx.session = makeSession(env, state, login, { fetch: fetchFn, secrets, baseUrl: config.form?.baseUrl || config.baseUrl });
+  return { def, ctx };
 }

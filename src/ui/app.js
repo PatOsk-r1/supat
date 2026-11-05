@@ -36,7 +36,7 @@ export function startApp(app, extensions = {}) {
   const guestProgress = { save() {}, flush() {}, get: () => null, resumeTime: () => 0, isFinished: () => false, recent: () => [], all: () => [], remove: async () => {}, clear: async () => {} };
   const state = { route: parseRoute(location.hash), query: "", filters: defaultFilters(), season: 0, confirm: null, restartRequested: false, tmdbStatus: "", formError: "", formMessage: "", busy: false,
     central: { tab: null, data: {}, loading: false, error: "", editing: null, newAdapter: "", testResult: null, logLevel: "" },
-    remote: null, sources: null };
+    remote: null, sources: null, priorities: null };
   const ctx = {
     catalog, settings, state, account, userdata, admin, ...extensions,
     get favorites() { return userdata.active ? userdata.favorites : guestFavorites; },
@@ -168,6 +168,20 @@ export function startApp(app, extensions = {}) {
     const results = { ...(state.sources.results || {}) };
     results[slot] = { ...(results[slot] || {}), [kind]: value };
     state.sources = { ...state.sources, results };
+  };
+  // Prioridad de datos entre fuentes (solo propietario).
+  ctx.loadPriorities = async ({ quiet = false } = {}) => {
+    if (state.priorities?.loading) return;
+    state.priorities = { ...state.priorities, loading: true };
+    if (!quiet) render();
+    try { state.priorities = { ...state.priorities, data: await centralAdmin.priorities(), loading: false, error: "" }; }
+    catch (err) { state.priorities = { ...state.priorities, loading: false, error: err?.message || "No se pudieron cargar las prioridades." }; }
+    if (state.route.name === "ajustes" && !state.busy) render();
+  };
+  const priorityForm = () => {
+    const form = app.querySelector('[data-form="priorities"]');
+    if (!form) return null;
+    return Object.fromEntries([...form.querySelectorAll("select")].map(sel => [sel.name, [sel.value, ...state.priorities.data.sources.map(x => x.id).filter(id => id !== sel.value)]]));
   };
   const refreshCatalog = () => { catalog.forgetThrottle("central"); catalog.load({ only: "central", force: true }).then(render); };
 
@@ -304,6 +318,14 @@ export function startApp(app, extensions = {}) {
 
     // ---------- catálogo central (propietario) ----------
     "admin-tab": el => { state.adminTab = el.dataset.tab; state.formError = ""; state.formMessage = ""; state.central.editing = null; render(); },
+    // ---------- prioridad de datos (Ajustes, propietario) ----------
+    "prio-preview": () => run(async () => { state.priorities = { ...state.priorities, preview: await centralAdmin.previewPriorities(priorityForm()) }; }),
+    "prio-apply": () => confirmThen("prio-apply", () => run(async () => {
+      await centralAdmin.applyPriorities();
+      state.formMessage = "Prioridades aplicadas: el catálogo se actualiza por tandas (sigue solo cada minuto).";
+      await ctx.loadPriorities({ quiet: true });
+    })),
+    "prio-continue": () => run(async () => { await centralAdmin.continuePriorities(); await ctx.loadPriorities({ quiet: true }); }),
     // ---------- fuentes de contenido (Ajustes, propietario) ----------
     "src-act": el => {
       const { slot, act } = el.dataset;
@@ -383,7 +405,7 @@ export function startApp(app, extensions = {}) {
     state.confirm = null;
     fn();
   }
-  const CONFIRM_ACTIONS = ["provider-remove", "data-clear", "logout-all", "list-delete", "history-clear", "admin-suspend", "admin-delete-list", "src-act", "central-cancel", "central-role", "central-block"];
+  const CONFIRM_ACTIONS = ["provider-remove", "data-clear", "logout-all", "list-delete", "history-clear", "admin-suspend", "admin-delete-list", "src-act", "prio-apply", "central-cancel", "central-role", "central-block"];
 
   app.addEventListener("click", ev => {
     const el = ev.target.closest("[data-action]");
@@ -405,6 +427,14 @@ export function startApp(app, extensions = {}) {
     const form = ev.target;
     ev.preventDefault();
     const data = Object.fromEntries(new FormData(form).entries());
+    if (form.dataset.form === "priorities") {
+      run(async () => {
+        await centralAdmin.savePriorities(priorityForm());
+        state.formMessage = "Prioridades guardadas SIN aplicar: los datos del catálogo no cambiaron. Usá la vista previa y después \"Aplicar a todo el catálogo\".";
+        await ctx.loadPriorities({ quiet: true });
+      });
+      return;
+    }
     if (form.dataset.form === "source-slot") {
       const slot = form.dataset.slot;
       run(async () => {
@@ -582,7 +612,7 @@ export function startApp(app, extensions = {}) {
     if (state.route.name !== previous.name || state.route.id !== previous.id || state.route.mode !== previous.mode) {
       state.formError = ""; state.formMessage = "";
       if (state.route.name !== "cuenta") state.authReason = "";
-      if (state.route.name === "ajustes") state.sources = null; // configuración fresca al entrar
+      if (state.route.name === "ajustes") { state.sources = null; state.priorities = null; } // configuración fresca al entrar
       if (state.route.name === "admin") { state.admin = null; state.central.data = {}; state.central.editing = null; } // datos frescos al entrar
       state.listItems = {}; // las listas se vuelven a leer al entrar (pueden haber cambiado)
     }

@@ -201,6 +201,26 @@ Una API que ignora el parámetro de página hacía que la importación pidiera p
 - **Subtítulos externos en el navegador:** el código está, pero no hay una fuente real con subtítulos para probarlo.
 - **Cambiar de fuente en la pantalla de reproducción con dos fuentes reales:** probado por la API, no en el navegador.
 
+## 10. Etapa de preparación de fuentes (2026-11-05)
+
+**121 pruebas: 115 aprobadas, 0 fallidas, 6 omitidas.** Las omitidas son las de integración real, que necesitan fuentes reales.
+
+- **Pruebas nuevas:** `tests/preparacion.test.js`, con 17 pruebas. Cubren:
+  - paginaciones mezcladas;
+  - límites (429, ventana, intervalo);
+  - reinicio de un trabajo;
+  - episodios ausentes, con importaciones parciales y completas;
+  - respuestas vacías anormales;
+  - prioridades: vista previa, aplicar, interrupción y reanudación;
+  - inicio de sesión rechazado y renovación del token;
+  - reproducción no compatible;
+  - subtítulos.
+- **Motor de Cloudflare local** (workerd + D1): dos fuentes importadas, prioridades de punta a punta, estado persistente y reproducción.
+- **Navegador:** selector de subtítulos con WebVTT y SRT, en `tests/fixtures/reproductor-subtitulos.html`.
+- **Sin probar en el navegador:** las pantallas nuevas de Ajustes. Faltó la sesión de propietario, porque los emuladores de Firebase estaban ocupados por otra sesión.
+
+Detalle: [docs/INFORME-ETAPA-PREPARACION.md](docs/INFORME-ETAPA-PREPARACION.md).
+
 ## 6. No verificado
 
 - Pantalla completa: el navegador integrado de la app no la permite; el código maneja el rechazo. Falta probar en Chrome/Edge.

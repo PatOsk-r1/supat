@@ -8,6 +8,7 @@ import { listTitles, searchTitles, titleDetail } from "./catalog.js";
 import { resolvePlayback, listPlaybackSources } from "./play.js";
 import { adminRoutes } from "./admin.js";
 import { sourcesAdminRoutes, catalogStatus } from "./sources.js";
+import { priorityRoutes, runMaintStep } from "./priorities-routes.js";
 import { runPending, scheduleDaily, fetchEpisodesNow } from "./sync.js";
 import { log } from "./log.js";
 import { KINDS } from "./providers/contract.js";
@@ -83,7 +84,7 @@ function compile(routes) {
   });
 }
 const USER = compile(userRoutes);
-const ADMIN = compile({ ...adminRoutes, ...sourcesAdminRoutes });
+const ADMIN = compile({ ...adminRoutes, ...sourcesAdminRoutes, ...priorityRoutes });
 
 function match(table, method, pathname) {
   let pathFound = false;
@@ -146,6 +147,8 @@ export default {
           if (created.length) await log(env, "info", "cron", `Sincronización diaria: ${created.length} trabajo(s) creados.`);
         }
         await runPending(env);
+        // Tareas de mantenimiento (por ejemplo, aplicar prioridades), una tanda por ejecución.
+        await runMaintStep(env);
       } catch (err) {
         await log(env, "error", "cron", `Fallo en la ejecución programada: ${err?.message || err}`);
       }

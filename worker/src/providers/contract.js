@@ -34,14 +34,19 @@ export const LIMITS = {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // fetch con límites para un proveedor. Lanza ProviderError (reintentable en 429/5xx/red).
-export function guardedFetch({ secrets = {}, minIntervalMs = 0, timeoutMs = LIMITS.timeoutMs, fetchImpl = fetch, budget = { left: LIMITS.maxSubrequests } } = {}) {
+// gate (opcional): control de frecuencia persistente de la fuente (provider-state.js). Sin gate,
+// solo se respeta minIntervalMs dentro de esta ejecución.
+export function guardedFetch({ secrets = {}, minIntervalMs = 0, timeoutMs = LIMITS.timeoutMs, fetchImpl = fetch, budget = { left: LIMITS.maxSubrequests }, gate = null } = {}) {
   let last = 0;
   return async function providerFetch(url, init = {}) {
     if (budget.left <= 0) throw new ProviderError("Se alcanzó el máximo de consultas por ejecución; se sigue en la próxima tanda.", { retryable: true, status: -1 });
+    if (gate) await gate.before();
+    else {
+      const wait = last + minIntervalMs - Date.now();
+      if (wait > 0) await sleep(Math.min(wait, 5000));
+      last = Date.now();
+    }
     budget.left--;
-    const wait = last + minIntervalMs - Date.now();
-    if (wait > 0) await sleep(Math.min(wait, 5000));
-    last = Date.now();
     const u = new URL(url);
     if (!["http:", "https:"].includes(u.protocol)) throw new ProviderError("Solo se permiten direcciones http o https.");
     const controller = new AbortController();
@@ -56,6 +61,8 @@ export function guardedFetch({ secrets = {}, minIntervalMs = 0, timeoutMs = LIMI
       clearTimeout(timer);
     }
     if (!res.ok) {
+      // Límite de frecuencia: 429, o 503 con "Retry-After". Se agenda la espera de forma persistente.
+      if (gate && (res.status === 429 || (res.status === 503 && res.headers.get("retry-after")))) throw gate.onLimited(res);
       const retryable = res.status === 429 || res.status >= 500;
       const hint = res.status === 401 || res.status === 403 ? " Revisá las credenciales." : res.status === 404 ? " Revisá la dirección o la ruta." : "";
       throw new ProviderError(redact(`El proveedor respondió ${res.status} en ${u.host}${u.pathname}.${hint}`, secrets), { retryable, status: res.status });

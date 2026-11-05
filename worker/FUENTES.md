@@ -40,6 +40,19 @@ episodes, episode_sources) → app (búsqueda, fichas, reproductor)
 - **Rutas dentro de las respuestas JSON:** `a.b`, `a[0].b`, `lista[].nombre`; para alternativas, `a|b`.
 - **Variables en plantillas y parámetros:** `{id}`, `{seriesId}`, `{season}`, `{episode}`, `{tmdb}`, `{imdb}`, `{lang}`, `{data.campo}`.
 
+## Agregado en la etapa de preparación (2026-11-05)
+
+- **Paginación por endpoint:** cada endpoint tiene su propio tipo, parámetro, rutas, máximo de páginas y de registros, y qué hacer ante páginas vacías, repetidas o inválidas. Lo vacío usa la paginación general.
+- **Límites de frecuencia:** intervalo mínimo, máximo por ventana, `Retry-After`, tratamiento del 429 y espera máxima. Se guardan en el servidor y se respetan entre tandas.
+- **Inicio de sesión:** usuario y contraseña a cambio de un token, guardado cifrado y renovado solo.
+- **Umbral de bajas:** porcentaje y mínimo, para títulos y episodios.
+- **Reproducción:** "exige encabezados" y "exige cookies" dejan la fuente como **no compatible** con reproducción directa. Una credencial dentro de la URL del video ya **no** se admite.
+- **Subtítulos:** por plantilla (con una lista de idiomas), por URL del catálogo, y SRT convertido en el navegador.
+- **Prioridad de datos entre fuentes:** es una sección aparte de Ajustes.
+- **Estados de la importación:** completada, con advertencias, parcial, fallida, pendiente, en espera o pausada.
+
+Detalle y verificación de cada punto: [docs/INFORME-ETAPA-PREPARACION.md](../docs/INFORME-ETAPA-PREPARACION.md).
+
 ## Herramientas de cada tarjeta
 
 - **Configuración:**

@@ -4,6 +4,7 @@
 import { escapeHtml } from "../app/util.js";
 import { readJSON, writeJSON } from "../app/storage.js";
 import { attachSource, detectType, mseSupported, HLS_TYPE } from "./engine.js";
+import { trackUrl } from "./subtitles.js";
 
 const VOLUME_KEY = "supat:volumen";
 
@@ -88,15 +89,23 @@ export function createPlayer(container, opts) {
 
   // Subtítulos externos (WebVTT). Si vienen de otro dominio, el video tiene que pedirse con CORS;
   // si eso hace fallar la reproducción, se vuelve a intentar sin subtítulos.
+  let blobUrls = [];
   function addTracks() {
     video.querySelectorAll("track").forEach(t => t.remove());
+    blobUrls.forEach(u => URL.revokeObjectURL(u));
+    blobUrls = [];
     const subs = (opts.source.subtitles || []).filter(t => /^https?:\/\//i.test(t.url || ""));
-    if (!subs.length) { video.removeAttribute("crossorigin"); return; }
+    if (!subs.length) { video.removeAttribute("crossorigin"); updateSubsMenu(); return; }
     video.crossOrigin = "anonymous";
     subs.forEach((t, i) => {
       const track = document.createElement("track");
-      Object.assign(track, { kind: "subtitles", src: t.url, srclang: t.lang || "", label: t.label || t.lang || `Subtítulos ${i + 1}` });
+      Object.assign(track, { kind: "subtitles", srclang: t.lang || "", label: t.label || t.lang || `Subtítulos ${i + 1}` });
       video.appendChild(track);
+      // WebVTT se usa directo; SRT se descarga y se convierte en el navegador.
+      trackUrl(t).then(url => {
+        if (url.startsWith("blob:")) blobUrls.push(url);
+        track.src = url;
+      }).catch(() => { track.remove(); updateSubsMenu(); showToast(`No se pudieron cargar los subtítulos "${escapeHtml(track.label)}".`); });
     });
     updateSubsMenu();
   }
@@ -105,7 +114,7 @@ export function createPlayer(container, opts) {
     if (!subsSelect) return;
     const tracks = [...video.querySelectorAll("track")];
     subsSelect.hidden = !tracks.length;
-    subsSelect.innerHTML = `<option value="-1">Sin subtítulos</option>` + tracks.map((t, i) => `<option value="${i}">${escapeHtml(t.label)}</option>`).join("");
+    subsSelect.innerHTML = `<option value="-1">Sin subtítulos</option>` + tracks.map((t, i) => `<option value="${i}">${escapeHtml(t.label)}${t.srclang ? ` (${escapeHtml(t.srclang)})` : ""}</option>`).join("");
   }
   function chooseSubs(index) {
     [...video.textTracks].forEach((t, i) => { t.mode = i === index ? "showing" : "disabled"; });
@@ -313,6 +322,7 @@ export function createPlayer(container, opts) {
       destroyed = true;
       clearTimeout(hideTimer);
       window.removeEventListener("pagehide", saveOnHide);
+      blobUrls.forEach(u => URL.revokeObjectURL(u));
       for (const [name, fn] of Object.entries(videoEvents)) video.removeEventListener(name, fn);
       video.pause();
       attached?.destroy();

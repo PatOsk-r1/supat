@@ -1,5 +1,21 @@
 # Auditoría técnica: Fuente A y Fuente B (2026-11-04)
 
+> **Actualización 2026-11-05.** La etapa de preparación resolvió varios riesgos de esta auditoría. El detalle está en [INFORME-ETAPA-PREPARACION.md](INFORME-ETAPA-PREPARACION.md).
+>
+> **Resuelto:**
+> - paginación independiente por endpoint (antes un endpoint podía importar solo su primera página sin aviso);
+> - límites de frecuencia persistentes y `Retry-After`;
+> - episodios ausentes marcados con protección;
+> - prioridades de datos por fuente y por campo, con vista previa y aplicación confirmada;
+> - estados completa, con advertencias, parcial y fallida;
+> - inicio de sesión con token renovable;
+> - credencial en la URL del video eliminada: esa fuente pasa a "no compatible";
+> - subtítulos por plantilla y por catálogo, conversión SRT y selector (probado en el navegador).
+>
+> **Sigue pendiente** (punto 1 de este documento): valores constantes, transformaciones, combinar campos, consulta de detalle por título, episodios dentro de la serie, temporadas con ID interno, endpoints con tipos mezclados, OAuth y firmas.
+>
+> Las tablas de abajo describen el estado **del 2026-11-04**.
+
 Se revisó el código, no solo la documentación. Cada afirmación está marcada:
 - **[probado]**: hay una prueba automática o una corrida real en local que lo verifica;
 - **[inspección]**: solo se revisó el código.

@@ -36,37 +36,53 @@ function authEntries(form, secrets) {
   if (type === "apiKeyQuery") auth.push({ in: "query", name: str(form.apiKeyName), value: "{apiKey}" });
   if (type === "bearer") auth.push({ in: "header", name: "Authorization", value: "Bearer {token}" });
   if (type === "basic") auth.push({ in: "basic" });
+  if (type === "login") {
+    const prefix = form["login.prefix"] === "-" ? "" : str(form["login.prefix"]) ? form["login.prefix"] : "Bearer ";
+    auth.push({ in: "header", name: str(form["login.header"]) || "Authorization", value: `${prefix}{sessionToken}` });
+  }
   // Los personalizados se mandan con cualquier tipo de autenticación (si están cargados).
   parseKv(secrets.authHeaders).forEach(([name], i) => auth.push({ in: "header", name, value: `{authHeader_${i}}` }));
   parseKv(secrets.authParams).forEach(([name], i) => auth.push({ in: "query", name, value: `{authParam_${i}}` }));
   return auth;
 }
 
-function pagination(form) {
-  const type = form["page.type"] || "none";
+// Paginación de un endpoint: sus propios valores y, si un campo queda vacío, el de la general.
+// (Compatibilidad: la opción anterior "paged = none" equivale a "sin paginación".)
+export function paginationFor(form, key) {
+  const own = k => str(form[`${key}.page.${k}`]);
+  const type = own("type") || (form[`${key}.paged`] === "none" ? "none" : "") || form["page.type"] || "none";
   const info = str(form["page.infoPath"]);
-  const at = p => (str(p) ? (info ? `${info}.${str(p)}` : str(p)) : undefined);
+  const at = (ownPath, generalKey) => {
+    const p = ownPath || str(form[generalKey]);
+    return p ? (info && !ownPath ? `${info}.${p}` : p) : undefined;
+  };
   return {
     type,
+    param: own("param") || str(form["page.pageParam"]),
+    sizeParam: own("sizeParam") || str(form["page.sizeParam"]),
     start: clamp(form["page.start"], 0, 1e6, 1),
-    limit: clamp(form["page.size"], 1, 10000, 50),
-    totalPages: at(form["page.totalPagesPath"]),
-    total: at(form["page.totalResultsPath"]),
-    next: at(form["page.nextPath"]),
-    lastPage: at(form["page.lastPagePath"])
+    limit: clamp(own("size") || form["page.size"], 1, 10000, 50),
+    totalPages: at(own("totalPagesPath"), "page.totalPagesPath"),
+    total: at(own("totalResultsPath"), "page.totalResultsPath"),
+    next: at(own("nextPath"), "page.nextPath"),
+    lastPage: at(own("lastPagePath"), "page.lastPagePath"),
+    maxPages: clamp(own("maxPages"), 0, 1e6, 0),
+    maxItems: clamp(own("maxItems"), 0, 1e9, 0),
+    onEmpty: own("onEmpty") || "end",
+    onRepeat: own("onRepeat") || "partial",
+    onInvalid: own("onInvalid") || "fail"
   };
 }
 
 function endpointSpec(form, key, map, prefix) {
   const path = str(form[`${key}.path`]);
   if (!path) return null;
-  const pg = form[`${key}.paged`] === "none" ? { type: "none" } : pagination(form);
+  const pg = paginationFor(form, key);
   const query = Object.fromEntries(parseKv(form[`${key}.params`]));
-  const pageParam = str(form["page.pageParam"]), sizeParam = str(form["page.sizeParam"]);
-  if (pageParam && pg.type === "page") query[pageParam] = "{page}";
-  if (pageParam && pg.type === "offset") query[pageParam] = "{offset}";
-  if (pageParam && pg.type === "cursor") query[pageParam] = "{cursor}";
-  if (sizeParam && pg.type !== "none") query[sizeParam] = String(pg.limit);
+  if (pg.param && pg.type === "page") query[pg.param] = "{page}";
+  if (pg.param && pg.type === "offset") query[pg.param] = "{offset}";
+  if (pg.param && pg.type === "cursor") query[pg.param] = "{cursor}";
+  if (pg.sizeParam && pg.type !== "none") query[pg.sizeParam] = String(pg.limit);
   if (str(form["page.sinceParam"])) query[str(form["page.sinceParam"])] = "{since}";
   return {
     path,
@@ -91,6 +107,7 @@ function titleMap(form) {
   set("data.type", "map.type"); set("data.seasonsCount", "map.seasonsCount"); set("data.episodesCount", "map.episodesCount");
   set("data.updatedAt", "map.updatedAt"); set("data.releaseDate", "map.releaseDate");
   if (form["play.mode"] === "direct") set("playback.url", "map.playbackUrl");
+  set("data.subtitleUrl", "map.subtitleUrl");
   for (const [name, path] of parseKv(form["map.extra"])) m[`data.${name}`] = path;
   return m;
 }
@@ -101,6 +118,7 @@ function episodeMap(form) {
   set("id", "epmap.id"); set("season", "epmap.season"); set("number", "epmap.number"); set("title", "epmap.title");
   set("description", "epmap.description"); set("still", "epmap.still"); set("duration", "epmap.duration");
   if (form["play.mode"] === "direct") set("playback.url", "epmap.playbackUrl");
+  set("data.subtitleUrl", "epmap.subtitleUrl");
   for (const [name, path] of parseKv(form["epmap.extra"])) m[`data.${name}`] = path;
   return m;
 }
@@ -131,6 +149,50 @@ export function compile(config, secrets = {}) {
 const withSpec = (ctx, spec) => ({ ...ctx, config: { baseUrl: formOf(ctx.config).baseUrl, spec } });
 const lazyModes = ["template", "api"];
 
+// Con "inicio de sesión": pone el token en las credenciales (para "auth" y para ocultarlo en textos)
+// y, si la fuente responde 401, renueva el token una vez y reintenta.
+async function withSession(ctx, fn) {
+  if (!ctx.session) return fn(ctx);
+  ctx.secrets.sessionToken = await ctx.session.token();
+  try {
+    return await fn(ctx);
+  } catch (err) {
+    if (err?.status !== 401) throw err;
+    ctx.secrets.sessionToken = await ctx.session.token(true);
+    return fn(ctx);
+  }
+}
+
+export const subtitleFormat = url => (/\.srt(\?|#|$)/i.test(String(url)) ? "srt" : "vtt");
+
+// Subtítulos que no requieren pedir nada: por plantilla (un idioma por línea) o con la URL del catálogo.
+function subtitleList(ctx, { source, episode, title = {} }) {
+  const form = formOf(ctx.config);
+  const out = [];
+  const tpl = str(episode ? form["play.subtitleEpisodeTemplate"] : form["play.subtitleMovieTemplate"]);
+  const playBase = str(form["play.baseUrl"]) || str(form.baseUrl);
+  const enc = v => encodeURIComponent(v ?? "");
+  const data = { ...(source?.data || {}), ...(episode?.data || {}) };
+  const vars = {
+    id: enc(episode ? rawId(episode) : source ? rawId(source) : ""), seriesId: enc(episode && source ? rawId(source) : ""),
+    season: enc(episode?.season ?? ""), episode: enc(episode?.number ?? ""), tmdb: enc(title.tmdb ?? ""), imdb: enc(title.imdb ?? ""),
+    data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, enc(v)]))
+  };
+  if (tpl) {
+    for (const [code, label] of parseKv(form["play.subtitleLangs"])) {
+      const filled = render(tpl, { ...vars, lang: enc(code) });
+      const url = safeUrl(/^https?:\/\//i.test(filled) ? filled : playBase.replace(/\/$/, "") + filled);
+      if (url) out.push({ url, lang: code, label: label || code, format: subtitleFormat(url) });
+    }
+  }
+  const mapped = safeUrl((episode ? episode.data : source?.data)?.subtitleUrl);
+  if (mapped) {
+    const lang = str(form["play.subtitleDefaultLang"]);
+    out.push({ url: mapped, lang, label: lang || "Subtítulos", format: subtitleFormat(mapped) });
+  }
+  return out;
+}
+
 // ¿Qué puede hacer esta fuente con la configuración actual? (lo que no está, figura como no soportado)
 export function capabilities(config) {
   const form = formOf(config);
@@ -140,6 +202,7 @@ export function capabilities(config) {
     : mode === "api" ? has("play.apiPath") && has("play.urlPath") : mode === "direct" ? has("map.playbackUrl") : false;
   const playEpisode = mode === "template" ? has("play.episodeTemplate") || has("play.seriesIdParam") || has("play.episodeParam")
     : mode === "api" ? (has("play.apiEpisodePath") || has("play.apiPath")) && has("play.urlPath") : mode === "direct" ? has("epmap.playbackUrl") : false;
+  const compatible = !playbackProblems(config).some(p => p.startsWith("NO COMPATIBLE"));
   return [
     ["connection", "Probar conexión", has("baseUrl")],
     ["movie", "Películas", form["cat.movie"] && has("ep.movie.path")],
@@ -149,9 +212,10 @@ export function capabilities(config) {
     ["episodes", "Episodios", Boolean(form["cat.episodes"]) && has("ep.episodes.path")],
     ["pagination", "Paginación", (form["page.type"] || "none") !== "none"],
     ["incremental", "Sincronización incremental", has("page.sinceParam")],
-    ["playMovie", "Reproducir películas", playMovie],
-    ["playEpisode", "Reproducir episodios", playEpisode],
-    ["subtitles", "Subtítulos", mode === "api" && has("play.subtitlesPath")],
+    ["playMovie", "Reproducir películas", playMovie && compatible],
+    ["playEpisode", "Reproducir episodios", playEpisode && compatible],
+    ["subtitles", "Subtítulos", (mode === "api" && has("play.subtitlesPath")) || has("play.subtitleMovieTemplate") || has("play.subtitleEpisodeTemplate") || has("map.subtitleUrl") || has("epmap.subtitleUrl")],
+    ["directPlayback", "Reproducción directa compatible", !form["play.requiresHeaders"] && !form["play.requiresCookies"] && form["play.keyIn"] !== "url"],
     ["expiry", "Enlaces que vencen", has("play.expiresPath") || has("play.expiresSec")]
   ].map(([id, label, supported]) => ({ id, label, supported: Boolean(supported) }));
 }
@@ -163,9 +227,12 @@ export function playbackProblems(config) {
   const mode = form["play.mode"] || "";
   if (!mode) return ["Elegí el método de reproducción."];
   const keyIn = form["play.keyIn"] || "";
-  const templates = [form["play.movieTemplate"], form["play.episodeTemplate"], ...parseKv(form["play.params"]).map(([, v]) => v)];
-  const usesKeyInTemplate = templates.some(t => placeholders(t || "").includes("playbackKey"));
-  if (usesKeyInTemplate && keyIn !== "url") p.push("Las plantillas usan {playbackKey}: elegí \"Dentro de la URL que usa el navegador\" en \"Dónde va la credencial de reproducción\" (quedará visible en el navegador).");
+  const templates = [form["play.movieTemplate"], form["play.episodeTemplate"], form["play.subtitleMovieTemplate"], form["play.subtitleEpisodeTemplate"], ...parseKv(form["play.params"]).map(([, v]) => v)];
+  const secretRefs = templates.flatMap(t => placeholders(t || "")).filter(n => ["playbackKey", "apiKey", "token", "username", "password", "sessionToken"].includes(n) || /^auth(Header|Param)_/.test(n));
+  // Incompatibilidades con la reproducción directa en el navegador (no se resuelven ocultando nada).
+  if (keyIn === "url" || secretRefs.length) p.push("NO COMPATIBLE con reproducción directa: la fuente exige una credencial dentro de la URL que usa el navegador, y Supat no envía credenciales privadas al navegador.");
+  if (form["play.requiresHeaders"]) p.push("NO COMPATIBLE con reproducción directa: el servidor de video exige encabezados propios que el navegador no puede enviar de forma segura.");
+  if (form["play.requiresCookies"]) p.push("NO COMPATIBLE con reproducción directa: el servidor de video exige cookies.");
   if (["header", "query", "body"].includes(keyIn) && !str(form["play.keyName"])) p.push("Falta el nombre del encabezado o parámetro de la credencial de reproducción.");
   if (["header", "query", "body"].includes(keyIn) && mode !== "api") p.push("La credencial en encabezado, parámetro o cuerpo solo funciona con el método \"Pedir la URL a un endpoint\".");
   for (const d of parseList(form["play.domains"])) {
@@ -217,10 +284,39 @@ export default {
   retryPolicy: config => ({ max: clamp(formOf(config).retryMax, 1, 10, 5), delayMs: clamp(formOf(config).retryDelaySec, 5, 3600, 60) * 1000 }),
   embedOrigins: config => (formOf(config)["play.contentType"] === "embed" ? parseList(formOf(config)["play.domains"]).map(d => d.replace(/\/$/, "")) : []),
   // Con "dentro de la URL", la credencial de reproducción puede ir en el enlace que usa el navegador.
-  urlSecretsAllowed: config => (formOf(config)["play.keyIn"] === "url" ? ["playbackKey"] : []),
+  // Ninguna credencial puede ir en el enlace que usa el navegador.
+  urlSecretsAllowed: () => [],
+  // Límite de frecuencia persistente (provider-state.js).
+  rateConfig: config => {
+    const f = formOf(config);
+    return {
+      minIntervalMs: clamp(f.minIntervalMs, 0, 600000, 0),
+      windowSec: clamp(f["rate.windowSec"], 0, 86400, 0),
+      windowMax: clamp(f["rate.windowMax"], 0, 1e6, 0),
+      honorRetryAfter: Boolean(f["rate.honorRetryAfter"]),
+      on429: f["rate.on429"] === "retry" ? "retry" : "wait",
+      maxWaitMs: clamp(f["rate.maxWaitSec"], 1, 86400, 3600) * 1000,
+      retryDelayMs: clamp(f.retryDelaySec, 5, 3600, 60) * 1000
+    };
+  },
+  // Umbral de seguridad de bajas (títulos y episodios).
+  removalPolicy: config => ({ percent: clamp(formOf(config)["safety.removalPercent"], 0, 100, 10), min: clamp(formOf(config)["safety.removalMin"], 0, 1e6, 20) }),
+  // Inicio de sesión → token (provider-state.js makeSession).
+  loginConfig: config => {
+    const f = formOf(config);
+    if (f.authType !== "login" || !str(f["login.path"])) return null;
+    return { path: str(f["login.path"]), format: f["login.format"] === "form" ? "form" : "json", userField: str(f["login.userField"]), passField: str(f["login.passField"]),
+      extra: parseKv(f["login.extra"]), tokenPath: str(f["login.tokenPath"]), expiresPath: str(f["login.expiresPath"]), ttlSec: clamp(f["login.ttlSec"], 60, 30 * 86400, 3600) };
+  },
+  subtitlesFor: (ctx, args) => subtitleList(ctx, args),
   validate: config => missingToActivate(formOf(config), config.__secretsSet || []),
 
-  async test(ctx) {
+  test(ctx) { return withSession(ctx, c => this._test(c)); },
+  listPage(ctx, args) { return withSession(ctx, c => this._listPage(c, args)); },
+  listEpisodes(ctx, args) { return withSession(ctx, c => this._listEpisodes(c, args)); },
+  resolve(ctx, args) { return withSession(ctx, c => this._resolve(c, args)); },
+
+  async _test(ctx) {
     const spec = compile(ctx.config, ctx.secrets);
     if (spec.test) {
       await callEndpoint(withSpec(ctx, spec), spec, spec.test, {});
@@ -228,11 +324,11 @@ export default {
     }
     const [kind] = Object.keys(spec.catalog);
     if (!kind) throw new ProviderError("No hay ningún endpoint de catálogo configurado para probar.");
-    const page = await this.listPage(ctx, { kind, cursor: null, since: null });
+    const page = await this._listPage(ctx, { kind, cursor: null, since: null });
     return { message: `Conexión correcta: ${page.items.length} resultado(s) en la primera página de "${kind}".`, sample: page.items.slice(0, 3).map(i => i.title) };
   },
 
-  async listPage(ctx, { kind, cursor, since }) {
+  async _listPage(ctx, { kind, cursor, since }) {
     const spec = compile(ctx.config, ctx.secrets);
     const form = formOf(ctx.config);
     const page = await generic.listPage(withSpec(ctx, spec), { kind, cursor, since });
@@ -249,7 +345,7 @@ export default {
     return page;
   },
 
-  async listEpisodes(ctx, args) {
+  async _listEpisodes(ctx, args) {
     const spec = compile(ctx.config, ctx.secrets);
     const lazy = lazyModes.includes(formOf(ctx.config)["play.mode"]);
     const source = args.source;
@@ -264,7 +360,7 @@ export default {
 
   // Fuente de reproducción de una película o de un episodio.
   // title: { tmdb, imdb } del título; source: fuente del título; episode: { externalId, season, number, data } o null.
-  async resolve(ctx, { source, episode, title = {} }) {
+  async _resolve(ctx, { source, episode, title = {} }) {
     const form = formOf(ctx.config);
     const problems = playbackProblems(ctx.config);
     if (problems.length) throw new ProviderError(problems.join(" "));
@@ -292,17 +388,15 @@ export default {
     let url, rawType, rawExpires, rawSubs = [];
     if (mode === "template") {
       const encoded = { ...Object.fromEntries(Object.entries(vars).filter(([k]) => k !== "data").map(([k, v]) => [k, encodeURIComponent(v)])), data: Object.fromEntries(Object.entries(vars.data).map(([k, v]) => [k, encodeURIComponent(v ?? "")])) };
-      if (keyIn === "url") encoded.playbackKey = encodeURIComponent(ctx.secrets.playbackKey || "");
       const tpl = str(episode ? form["play.episodeTemplate"] : form["play.movieTemplate"]);
       let u;
       try { u = new URL(tpl ? (/^https?:\/\//i.test(tpl) ? render(tpl, encoded) : playBase.replace(/\/$/, "") + render(tpl, encoded)) : playBase); }
       catch { throw new ProviderError("La plantilla de reproducción no forma una URL válida."); }
       if (!tpl && !extraParams.length) throw new ProviderError(`Falta la plantilla de URL de ${episode ? "episodios" : "películas"} o sus parámetros.`);
       for (const [k, t] of extraParams) {
-        const v = render(t, { ...vars, playbackKey: keyIn === "url" ? ctx.secrets.playbackKey : "" });
+        const v = render(t, vars);
         if (v !== "") u.searchParams.set(k, v);
       }
-      if (keyIn === "url" && str(form["play.keyName"])) u.searchParams.set(str(form["play.keyName"]), ctx.secrets.playbackKey || "");
       url = u.toString();
     } else if (mode === "api") {
       const path = str(episode ? form["play.apiEpisodePath"] || form["play.apiPath"] : form["play.apiPath"]);
@@ -329,8 +423,8 @@ export default {
       url: safeUrl(pick(s, str(form["play.subtitleUrl"]) || "url")),
       lang: String(pick(s, str(form["play.subtitleLang"]) || "lang") ?? "").slice(0, 20),
       label: String(pick(s, str(form["play.subtitleLabel"]) || "label") ?? "").slice(0, 60)
-    })).filter(s => s.url);
-    return { url: String(url), type, subtitles, expiresAt: expiresAtFrom(rawExpires, form) };
+    })).filter(s => s.url).map(s => ({ ...s, format: subtitleFormat(s.url) }));
+    return { url: String(url), type, subtitles: [...subtitles, ...subtitleList(ctx, { source, episode, title })], expiresAt: expiresAtFrom(rawExpires, form) };
   },
 
   // Dominios permitidos para los enlaces (vacío = cualquiera, salvo reproductores externos).

@@ -11,6 +11,8 @@ export const slotOfProvider = providerId => Object.keys(SLOTS).find(k => SLOTS[k
 // Credenciales: se guardan cifradas en el servidor y nunca vuelven al navegador.
 export const SECRET_FIELDS = ["apiKey", "token", "username", "password", "playbackKey", "authHeaders", "authParams"];
 
+export const PAGE_TYPES = [["none", "Sin paginación"], ["page", "Número de página"], ["offset", "Desplazamiento (offset)"], ["cursor", "Cursor"], ["link", "Enlace a la página siguiente"]];
+
 const KV_HELP = "Una por línea, con el formato nombre=valor.";
 const PLACEHOLDERS_LIST = "{id}, {seriesId}, {season}, {episode}, {tmdb}, {imdb}, {lang}, {data.campo}";
 
@@ -22,7 +24,19 @@ function endpoint(key, label, extra = "") {
     fields: [
       { key: `${key}.path`, label: "Ruta (relativa a la URL base)", type: "text", placeholder: "/…", help: `Empieza con "/". ${extra}` },
       { key: `${key}.method`, label: "Método HTTP", ...httpMethod },
-      { key: `${key}.paged`, label: "Paginación de este endpoint", type: "select", options: [["", "Usar la paginación general"], ["none", "Sin paginación (una sola respuesta)"]] },
+      { key: `${key}.page.type`, label: "Paginación de este endpoint", type: "select", options: [["", "Usar la paginación general"], ...PAGE_TYPES] },
+      { key: `${key}.page.param`, label: "Parámetro de página / offset / cursor (de este endpoint)", type: "text", help: "Vacío = el de la paginación general." },
+      { key: `${key}.page.sizeParam`, label: "Parámetro de resultados por página (de este endpoint)", type: "text" },
+      { key: `${key}.page.size`, label: "Resultados por página (de este endpoint)", type: "number" },
+      { key: `${key}.page.nextPath`, label: "Ruta del cursor o enlace siguiente (de este endpoint)", type: "text" },
+      { key: `${key}.page.lastPagePath`, label: "Ruta del indicador de última página (de este endpoint)", type: "text" },
+      { key: `${key}.page.totalPagesPath`, label: "Ruta del total de páginas (de este endpoint)", type: "text" },
+      { key: `${key}.page.totalResultsPath`, label: "Ruta del total de resultados (de este endpoint)", type: "text" },
+      { key: `${key}.page.maxPages`, label: "Máximo de páginas", type: "number", help: "Si se alcanza, la importación queda PARCIAL (no completa)." },
+      { key: `${key}.page.maxItems`, label: "Máximo de registros", type: "number", help: "Si se alcanza, la importación queda PARCIAL." },
+      { key: `${key}.page.onEmpty`, label: "Si una página llega vacía", type: "select", options: [["end", "Es el fin del listado"], ["partial", "Marcar la importación como parcial"]], help: "Si la fuente informa un total y todavía faltaban registros, siempre queda parcial." },
+      { key: `${key}.page.onRepeat`, label: "Si una página llega repetida", type: "select", options: [["partial", "Detener y marcar la importación como parcial"], ["end", "Es el fin del listado"]] },
+      { key: `${key}.page.onInvalid`, label: "Si la respuesta no trae la lista esperada", type: "select", options: [["fail", "La importación falla"], ["partial", "Detener ese endpoint y marcar parcial"]] },
       { key: `${key}.items`, label: "Ruta del array de resultados en la respuesta", type: "text", help: "Por ejemplo data.results. Vacío = la respuesta es el array." },
       { key: `${key}.params`, label: "Parámetros", type: "kv", help: `${KV_HELP} Admiten ${PLACEHOLDERS_LIST}.` },
       { key: `${key}.headers`, label: "Encabezados (no secretos)", type: "kv", help: KV_HELP }
@@ -41,13 +55,30 @@ export const SECTIONS = [
       { key: "timeoutSec", label: "Tiempo máximo por consulta (segundos)", type: "number", placeholder: "15", help: "Entre 2 y 30." },
       { key: "retryMax", label: "Reintentos ante errores temporales", type: "number", placeholder: "5", help: "Entre 1 y 10." },
       { key: "retryDelaySec", label: "Espera inicial entre reintentos (segundos)", type: "number", placeholder: "60", help: "Se duplica en cada reintento." },
-      { key: "minIntervalMs", label: "Pausa mínima entre consultas (milisegundos)", type: "number", placeholder: "0", help: "Para respetar el límite de solicitudes de la fuente." }
+      { key: "minIntervalMs", label: "Pausa mínima entre consultas (milisegundos)", type: "number", placeholder: "0", help: "Se respeta también entre tandas y ejecuciones del servidor." },
+      { key: "rate.windowSec", label: "Ventana de límite de solicitudes (segundos)", type: "number", help: "Junto con el campo siguiente: como máximo N solicitudes cada tantos segundos." },
+      { key: "rate.windowMax", label: "Solicitudes máximas por ventana", type: "number" },
+      { key: "rate.honorRetryAfter", label: "Respetar la espera que indique el servidor (Retry-After)", type: "check" },
+      { key: "rate.on429", label: "Ante \"demasiadas solicitudes\" (429)", type: "select", options: [["wait", "Esperar y seguir, sin gastar reintentos"], ["retry", "Contarlo como un reintento"]] },
+      { key: "rate.maxWaitSec", label: "Espera máxima aceptada (segundos)", type: "number", placeholder: "3600", help: "Tope para la espera del servidor y entre reintentos." },
+      { key: "safety.removalPercent", label: "Umbral de bajas (%)", type: "number", placeholder: "10", help: "Si una importación completa dejaría sin ver más de este porcentaje de títulos o de episodios de una serie, no se marca ninguna baja y queda parcial." },
+      { key: "safety.removalMin", label: "Bajas mínimas para aplicar el umbral", type: "number", placeholder: "20" }
     ]
   },
   {
     id: "auth", title: "Autenticación",
     fields: [
-      { key: "authType", label: "Tipo de autenticación", type: "select", options: [["none", "Ninguna"], ["apiKeyHeader", "API Key en un encabezado"], ["apiKeyQuery", "API Key en un parámetro"], ["bearer", "Token (Authorization: Bearer)"], ["basic", "Usuario y contraseña (básica)"], ["custom", "Solo encabezados/parámetros personalizados"]] },
+      { key: "authType", label: "Tipo de autenticación", type: "select", options: [["none", "Ninguna"], ["apiKeyHeader", "API Key en un encabezado"], ["apiKeyQuery", "API Key en un parámetro"], ["bearer", "Token (Authorization: Bearer)"], ["basic", "Usuario y contraseña (básica)"], ["login", "Inicio de sesión: usuario y contraseña → token"], ["custom", "Solo encabezados/parámetros personalizados"]] },
+      { key: "login.path", label: "Inicio de sesión: ruta", type: "text", help: "Relativa a la URL base. Se manda por POST." },
+      { key: "login.format", label: "Inicio de sesión: formato del cuerpo", type: "select", options: [["json", "JSON"], ["form", "Formulario (x-www-form-urlencoded)"]] },
+      { key: "login.userField", label: "Inicio de sesión: nombre del campo de usuario", type: "text", placeholder: "username" },
+      { key: "login.passField", label: "Inicio de sesión: nombre del campo de contraseña", type: "text", placeholder: "password" },
+      { key: "login.extra", label: "Inicio de sesión: otros campos", type: "kv", help: "Una por línea, nombre=valor (no secretos)." },
+      { key: "login.tokenPath", label: "Inicio de sesión: ruta del token en la respuesta", type: "text" },
+      { key: "login.expiresPath", label: "Inicio de sesión: ruta del vencimiento (segundos o fecha)", type: "text" },
+      { key: "login.ttlSec", label: "Duración del token si la respuesta no la informa (segundos)", type: "number", placeholder: "3600" },
+      { key: "login.header", label: "Encabezado donde va el token", type: "text", placeholder: "Authorization" },
+      { key: "login.prefix", label: "Prefijo del token", type: "text", placeholder: "Bearer " },
       { key: "apiKeyName", label: "Nombre del encabezado o parámetro de la API Key", type: "text" },
       { key: "apiKey", label: "API Key", type: "secret" },
       { key: "token", label: "Token", type: "secret" },
@@ -111,6 +142,7 @@ export const SECTIONS = [
       { key: "map.episodesCount", label: "Cantidad de episodios", type: "text" },
       { key: "map.updatedAt", label: "Fecha de actualización", type: "text" },
       { key: "map.playbackUrl", label: "URL de reproducción (si la trae el catálogo)", type: "text", help: "Solo para el método de reproducción \"directo\"." },
+      { key: "map.subtitleUrl", label: "URL de subtítulos (si la trae el catálogo)", type: "text", help: "WebVTT o SRT. Idioma: el de \"Subtítulos: idioma por defecto\"." },
       { key: "map.extra", label: "Otros campos", type: "kv", help: `${KV_HELP} nombre=ruta. Se guardan y se pueden usar como {data.nombre}.` },
       { key: "img.posterPrefix", label: "Prefijo de pósters con ruta relativa", type: "text" },
       { key: "img.backdropPrefix", label: "Prefijo de backdrops con ruta relativa", type: "text" },
@@ -123,6 +155,7 @@ export const SECTIONS = [
       { key: "epmap.still", label: "Episodios: imagen", type: "text" },
       { key: "epmap.duration", label: "Episodios: duración (segundos)", type: "text" },
       { key: "epmap.playbackUrl", label: "Episodios: URL de reproducción (método directo)", type: "text" },
+      { key: "epmap.subtitleUrl", label: "Episodios: URL de subtítulos", type: "text" },
       { key: "epmap.extra", label: "Episodios: otros campos", type: "kv", help: `${KV_HELP} nombre=ruta.` },
       { key: "img.stillPrefix", label: "Prefijo de imágenes de episodios", type: "text" }
     ]
@@ -147,8 +180,10 @@ export const SECTIONS = [
       { key: "play.typePath", label: "Ruta del formato en la respuesta (opcional)", type: "text" },
       { key: "play.expiresPath", label: "Ruta del vencimiento en la respuesta (opcional)", type: "text", help: "Segundos que dura el enlace, o una fecha." },
       { key: "playbackKey", label: "Credencial de reproducción", type: "secret", help: "Solo se usa para obtener o habilitar los enlaces de reproducción." },
-      { key: "play.keyIn", label: "Dónde va la credencial de reproducción", type: "select", options: [["", "No se usa"], ["header", "Encabezado (método endpoint)"], ["query", "Parámetro (método endpoint)"], ["body", "Cuerpo JSON (método endpoint)"], ["url", "Dentro de la URL que usa el navegador"]] },
-      { key: "play.keyName", label: "Nombre del encabezado o parámetro de la credencial", type: "text", help: "Con \"dentro de la URL\": nombre del parámetro, o usá {playbackKey} en la plantilla." },
+      { key: "play.keyIn", label: "Dónde va la credencial de reproducción", type: "select", options: [["", "No se usa"], ["header", "Encabezado (método endpoint)"], ["query", "Parámetro (método endpoint)"], ["body", "Cuerpo JSON (método endpoint)"]], help: "Solo la usa el servidor para pedir el enlace. Si la fuente exige la credencial dentro de la URL del video, no es compatible con reproducción directa." },
+      { key: "play.keyName", label: "Nombre del encabezado o parámetro de la credencial", type: "text" },
+      { key: "play.requiresHeaders", label: "El servidor de video exige encabezados propios", type: "check", help: "El navegador no puede enviarlos de forma segura: la fuente queda como NO compatible con reproducción directa." },
+      { key: "play.requiresCookies", label: "El servidor de video exige cookies", type: "check", help: "No compatible con reproducción directa." },
       { key: "play.domains", label: "Dominios de reproducción permitidos", type: "list", help: "Uno por línea (https://dominio). Los enlaces de otros dominios se rechazan. Obligatorio para reproductores externos." },
       { key: "play.contentType", label: "Tipo de contenido", type: "select", options: [["video", "Video (reproductor de Supat)"], ["embed", "Reproductor externo (iframe)"]] },
       { key: "play.format", label: "Formato de video", type: "select", options: [["", "Detectar"], ["hls", "HLS (.m3u8)"], ["mp4", "MP4"], ["webm", "WebM"]] },
@@ -156,6 +191,10 @@ export const SECTIONS = [
       { key: "play.subtitleUrl", label: "Subtítulos: campo de la URL", type: "text", placeholder: "url" },
       { key: "play.subtitleLang", label: "Subtítulos: campo del idioma", type: "text", placeholder: "lang" },
       { key: "play.subtitleLabel", label: "Subtítulos: campo de la etiqueta", type: "text", placeholder: "label" },
+      { key: "play.subtitleMovieTemplate", label: "Subtítulos: plantilla de URL para películas", type: "text", help: "Admite {id}, {tmdb}, {imdb}, {lang} y {data.campo}. Se arma una por cada idioma de la lista de abajo." },
+      { key: "play.subtitleEpisodeTemplate", label: "Subtítulos: plantilla de URL para episodios", type: "text", help: "Admite además {seriesId}, {season} y {episode}." },
+      { key: "play.subtitleLangs", label: "Subtítulos: idiomas", type: "kv", help: "Una por línea: código=Nombre visible (por ejemplo es=Español)." },
+      { key: "play.subtitleDefaultLang", label: "Subtítulos: idioma por defecto (URL del catálogo)", type: "text" },
       { key: "play.langParam", label: "Idioma: nombre del parámetro", type: "text" },
       { key: "play.langValue", label: "Idioma: valor", type: "text", help: "También disponible como {lang}." },
       { key: "play.expiresSec", label: "Duración de los enlaces (segundos)", type: "number", help: "Si los enlaces vencen y la respuesta no lo informa. Supat pide uno nuevo al reintentar." }
@@ -192,8 +231,11 @@ export function missingToSave(form) {
   return m;
 }
 
+const ENDPOINT_LABELS = { "ep.movie": "películas", "ep.series": "series", "ep.anime": "anime", "ep.episodes": "episodios" };
+
 export function missingToActivate(form, secretsSet = []) {
   const m = [...missingToSave(form)];
+  const auth = form.authType || "none";
   const kinds = ["movie", "series", "anime"].filter(k => form[`cat.${k}`] && String(form[`ep.${k}.path`] || "").trim());
   if (!kinds.length) m.push("Al menos una categoría marcada para importar, con su endpoint");
   for (const k of ["movie", "series", "anime"]) {
@@ -208,10 +250,23 @@ export function missingToActivate(form, secretsSet = []) {
       if (!String(form["epmap.number"] || "").trim()) m.push("Mapeo: número de episodio");
     }
   }
-  const pt = form["page.type"] || "none";
-  if (["page", "offset", "cursor"].includes(pt) && !String(form["page.pageParam"] || "").trim()) m.push("Paginación: parámetro de página / offset / cursor");
-  if (["cursor", "link"].includes(pt) && !String(form["page.nextPath"] || "").trim()) m.push("Paginación: ruta del cursor o enlace siguiente");
-  const auth = form.authType || "none";
+  const has = k => String(form[k] || "").trim() !== "";
+  const used = ["movie", "series", "anime"].filter(k => form[`cat.${k}`] && has(`ep.${k}.path`)).map(k => `ep.${k}`);
+  if (form["cat.episodes"] && has("ep.episodes.path")) used.push("ep.episodes");
+  for (const key of used) {
+    const own = form[`${key}.page.type`];
+    const t = own || form["page.type"] || "none";
+    const param = has(`${key}.page.param`) || (!own && has("page.pageParam")) || (own && has("page.pageParam"));
+    const next = has(`${key}.page.nextPath`) || has("page.nextPath");
+    const label = `Paginación de ${ENDPOINT_LABELS[key]}`;
+    if (["page", "offset", "cursor"].includes(t) && !param) m.push(`${label}: parámetro de página / offset / cursor`);
+    if (["cursor", "link"].includes(t) && !next) m.push(`${label}: ruta del cursor o enlace siguiente`);
+  }
+  if (auth === "login") {
+    if (!has("login.path")) m.push("Autenticación: ruta de inicio de sesión");
+    if (!has("login.tokenPath")) m.push("Autenticación: ruta del token en la respuesta de inicio de sesión");
+    if (!(secretsSet.includes("username") && secretsSet.includes("password"))) m.push("Autenticación: Usuario y Contraseña");
+  }
   if (["apiKeyHeader", "apiKeyQuery"].includes(auth)) {
     if (!String(form.apiKeyName || "").trim()) m.push("Autenticación: nombre del encabezado o parámetro de la API Key");
     if (!secretsSet.includes("apiKey")) m.push("Autenticación: API Key");

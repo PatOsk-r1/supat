@@ -117,8 +117,9 @@ test("credenciales de las dos fuentes: cifradas, nunca en respuestas, registros 
   for (const secret of [...ALL_SECRETS, "valor-secreto-extra"]) assert.ok(!text.includes(secret), `apareció una credencial`);
   assert.deepEqual(view.sources.a.secretsSet.sort(), ["apiKey", "authHeaders", "playbackKey"]);
   assert.deepEqual(view.sources.a.customSecretNames.authHeaders, ["X-Extra"]);
-  assert.deepEqual(view.sources.b.secretsSet.sort(), ["playbackKey", "token"]);
+  assert.deepEqual(view.sources.b.secretsSet, ["token"]);
   // Guardar sin reescribirlas las conserva; "borrar" quita solo la elegida.
+  await save(env, net, "b", FORM_B(), { playbackKey: PLAY_KEY_B });
   await save(env, net, "b", FORM_B(), {});
   assert.deepEqual((await api(env, "GET", "/api/admin/sources", OWNER)).body.sources.b.secretsSet.sort(), ["playbackKey", "token"]);
   await save(env, net, "b", FORM_B(), {}, { clearSecrets: ["playbackKey"] });
@@ -170,7 +171,7 @@ test("probar conexión y catálogo en cada fuente; una clave equivocada falla si
   assert.equal(view.a.lastTest.ok, true);
 });
 
-test("probar reproducción: endpoint con credencial en encabezado (A) y plantilla con credencial en la URL (B, con aviso)", async () => {
+test("probar reproducción: endpoint con credencial en encabezado (A) y plantilla sin credencial (B); credencial en URL = no compatible", async () => {
   const env = makeEnv();
   const net = bothNets();
   await configure(env, net, "a", FORM_A(), SECRETS_A);
@@ -182,16 +183,19 @@ test("probar reproducción: endpoint con credencial en encabezado (A) y plantill
   assert.equal(pe.ok, true, pe.message);
   const pb = (await act(env, net, "b", "test-playback", { kind: "movie" })).body;
   assert.equal(pb.ok, true, pb.message);
-  assert.match(pb.message, /Vence en 10 min.*credencial de reproducción queda visible/);
+  assert.match(pb.message, /Vence en 10 min/);
+  assert.doesNotMatch(pb.message, /visible/);
   const peb = (await act(env, net, "b", "test-playback", { kind: "episode" })).body;
   assert.equal(peb.ok, true, peb.message);
   for (const r of [pa, pe, pb, peb]) for (const s of ALL_SECRETS) assert.ok(!JSON.stringify(r).includes(s));
   assert.ok(!JSON.stringify([pa, pb]).includes("https://"), "la prueba no devuelve el enlace");
-  // Plantilla con {playbackKey} sin elegir "dentro de la URL": se explica y no se reproduce.
-  await save(env, net, "b", { ...FORM_B(), "play.keyIn": "", "play.movieTemplate": `${FORM_B()["play.baseUrl"]}/m/{id}.mp4?t={playbackKey}` });
+  // Una plantilla que pondría una credencial en la URL del navegador: NO compatible, no se reproduce.
+  await save(env, net, "b", { ...FORM_B(), "play.movieTemplate": `${FORM_B()["play.baseUrl"]}/m/{id}.mp4?t={playbackKey}` }, { playbackKey: PLAY_KEY_B });
   const bad = (await act(env, net, "b", "test-playback", { kind: "movie" })).body;
   assert.equal(bad.ok, false);
-  assert.match(bad.message, /quedará visible/);
+  assert.match(bad.message, /NO COMPATIBLE/);
+  const caps = (await api(env, "GET", "/api/admin/sources", OWNER)).body.sources.b.capabilities;
+  assert.equal(caps.find(c => c.id === "playMovie").supported, false);
 });
 
 // ---------- importación ----------
@@ -266,7 +270,7 @@ test("duplicados entre fuentes: TMDb une; el título muestra las dos fuentes y s
   const epSources = (await api(env, "GET", `/api/catalog/titles/${serie.id}/sources?episode=${e21.id}`, { uid: "ana" })).body.sources;
   assert.deepEqual(epSources.map(s => s.label), ["Opción 1", "Opción 2"]);
   const epB = (await api(env, "GET", `/api/catalog/titles/${serie.id}/play?episode=${e21.id}&source=${epSources[1].id}`, { uid: "ana", fetchImpl: net })).body;
-  assert.ok(epB.url.startsWith("https://video.otra.ejemplo/e/show-1/2/1.m3u8?"));
+  assert.equal(epB.url, "https://video.otra.ejemplo/e/show-1/2/1.m3u8");
   assert.equal(epB.type, "", "formato a detectar por el reproductor");
 });
 
@@ -310,7 +314,7 @@ test("reproducción por endpoint: subtítulos y vencimiento informados por la fu
     ? new Response(JSON.stringify({ stream: { url: "https://cdn.prov.ejemplo/x.m3u8", type: "hls" }, ttl: 120, subs: [{ url: "https://cdn.prov.ejemplo/es.vtt", lang: "es", label: "Español" }, { url: "javascript:mal" }] }))
     : net(url, init));
   const play2 = (await api(env, "GET", `/api/catalog/titles/${one.id}/play`, { uid: "ana", fetchImpl: fetchWithSubs })).body;
-  assert.deepEqual(play2.subtitles, [{ url: "https://cdn.prov.ejemplo/es.vtt", lang: "es", label: "Español" }]);
+  assert.deepEqual(play2.subtitles, [{ url: "https://cdn.prov.ejemplo/es.vtt", lang: "es", label: "Español", format: "vtt" }]);
   assert.ok(play2.expiresAt > Date.now() + 100e3 && play2.expiresAt < Date.now() + 125e3);
 });
 
@@ -481,9 +485,11 @@ test("las claves del formulario no incluyen credenciales (se guardan aparte, cif
 test("una API que ignora el parámetro de página no deja la importación pidiendo páginas para siempre", async () => {
   const env = makeEnv();
   const net = bothNets();
-  await configure(env, net, "a", { ...FORM_A(), "ep.episodes.paged": "" }, SECRETS_A);
+  await configure(env, net, "a", { ...FORM_A(), "ep.episodes.page.type": "" }, SECRETS_A);
   const job = await importAll(env, net, "a");
   assert.equal(job.status, "done", job.lastError);
-  assert.equal(job.episodes, 3);
   assert.ok(job.pages < 20, `páginas: ${job.pages}`);
+  // Una página repetida antes de terminar NO se da por completa: queda PARCIAL y sin bajas.
+  assert.equal(job.outcome, "partial");
+  assert.match(job.outcomeDetail, /repetida/);
 });

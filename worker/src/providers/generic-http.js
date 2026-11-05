@@ -6,7 +6,7 @@ import { ProviderError, pick, readJsonBody, KINDS, playbackType } from "./contra
 // Credenciales de acceso a la API (catálogo, temporadas, episodios): solo en "auth".
 const API_SECRETS = ["apiKey", "token", "username", "password"];
 // Encabezados y parámetros de autenticación personalizados (Ajustes): authHeader_0, authParam_0, …
-const isCustomApiSecret = name => /^auth(Header|Param)_\d{1,2}$/.test(name);
+const isCustomApiSecret = name => /^auth(Header|Param)_\d{1,2}$/.test(name) || name === "sessionToken";
 // Credencial de reproducción: solo en "playbackAuth", que se usa ÚNICAMENTE al pedir la fuente
 // (resolve / resolveEpisode). Nunca se manda en las consultas del catálogo.
 const PLAYBACK_SECRETS = ["playbackKey"];
@@ -169,47 +169,73 @@ function pageFingerprint(rows) {
   return `${rows.length}:${h.toString(36)}`;
 }
 
-function nextCursor(ep, cursor, data, count, root, rows = null) {
-  const next = nextCursorRaw(ep, cursor, data, count, root);
-  if (!next || !rows) return next;
-  const fp = pageFingerprint(rows);
-  if (cursor?.fp && cursor.fp === fp) return null; // misma página otra vez
-  return { ...next, fp };
-}
+// Decide si hay otra página y, si no, POR QUÉ terminó el listado:
+//   { next, end: null }                         → sigue
+//   { next: null, end: { reason, anomaly } }     → terminó; anomaly = true si NO se puede dar por
+//                                                  completo (página repetida o vacía antes de tiempo,
+//                                                  límite de páginas o de registros, más páginas de las
+//                                                  permitidas). Con una anomalía la importación queda PARCIAL.
+const ANOMALY_TEXT = {
+  repeated: "una página llegó repetida antes de terminar el listado",
+  empty: "una página llegó vacía cuando la fuente informaba que faltaban registros",
+  maxPages: "se alcanzó el máximo de páginas configurado",
+  maxItems: "se alcanzó el máximo de registros configurado",
+  hardLimit: "se alcanzó el límite interno de páginas",
+  invalid: "la respuesta no traía la lista esperada"
+};
+export const anomalyText = reason => ANOMALY_TEXT[reason] || reason;
 
-function nextCursorRaw(ep, cursor, data, count, root) {
+function nextCursor(ep, cursor, data, rows, root) {
   const pg = ep.pagination || { type: "none" };
-  if (pg.type === "none" || !count) return null;
-  if ((cursor?.n || 0) + 1 >= MAX_PAGES) return null;
-  // Indicador de última página que da la propia fuente.
+  const end = (reason, anomaly = false) => ({ next: null, end: { reason, anomaly } });
+  if (pg.type === "none") return end("single");
+  const n = (cursor?.n || 0) + 1;
+  const count = (cursor?.count || 0) + rows.length;
+  const page = cursor?.page ?? (Number(pg.start) || 1);
+  let totalPages = Number(pick(data, pg.totalPages)) || 0;
+  const totalResults = Number(pick(data, pg.total)) || 0;
+  if (!totalPages && totalResults && Number(pg.limit)) totalPages = Math.ceil(totalResults / Number(pg.limit));
+  const known = Boolean(totalPages || totalResults);
+  const moreExpected = (totalResults && count < totalResults) || (pg.type === "page" && totalPages && page < totalPages);
+
+  if (!rows.length) {
+    if (moreExpected || pg.onEmpty === "partial") return end("empty", true);
+    return end("emptyEnd");
+  }
   if (pg.lastPage) {
     const last = pick(data, pg.lastPage);
-    if (last === true || last === 1 || last === "true" || last === "1") return null;
+    if (last === true || last === 1 || last === "true" || last === "1") return end("lastPage");
   }
-  const n = (cursor?.n || 0) + 1;
+  const fp = pageFingerprint(rows);
+  if (cursor?.fp && cursor.fp === fp) return end(pg.onRepeat === "end" ? "repeatedEnd" : "repeated", pg.onRepeat !== "end");
+
+  let raw = null;
   if (pg.type === "page") {
-    const page = cursor?.page ?? (Number(pg.start) || 1);
-    let total = Number(pick(data, pg.totalPages));
-    // Sin total de páginas, pero con total de resultados y tamaño de página: se calcula.
-    if (!total && pg.total && Number(pg.limit)) total = Math.ceil(Number(pick(data, pg.total)) / Number(pg.limit));
-    if (total && page >= total) return null;
-    return { page: page + 1, n };
-  }
-  if (pg.type === "offset") {
+    raw = totalPages && page >= totalPages ? null : { page: page + 1 };
+    if (!raw) return end("totalPages");
+  } else if (pg.type === "offset") {
     const limit = Number(pg.limit) || 50;
-    const offset = (cursor?.offset ?? 0) + count;
-    const total = Number(pick(data, pg.total));
-    if ((total && offset >= total) || count < limit) return null;
-    return { offset, n };
+    const offset = (cursor?.offset ?? 0) + rows.length;
+    if (totalResults && offset >= totalResults) return end("totalResults");
+    if (!known && rows.length < limit) return end("shortPage");
+    raw = { offset };
+  } else {
+    const next = pick(data, pg.next);
+    if (!next) return end("noNext");
+    if (pg.type === "cursor") raw = { cursor: String(next).slice(0, 500) };
+    else {
+      // "link": dirección de la página siguiente; tiene que ser del mismo servidor.
+      let u;
+      try { u = new URL(String(next), root); } catch { return end("noNext"); }
+      if (u.origin !== root.origin) throw new ProviderError("La página siguiente apunta a otro servidor; se detuvo la importación.");
+      raw = { link: u.pathname + u.search };
+    }
   }
-  const next = pick(data, pg.next);
-  if (!next) return null;
-  if (pg.type === "cursor") return { cursor: String(next).slice(0, 500), n };
-  // "link": dirección de la página siguiente; tiene que ser del mismo servidor.
-  let u;
-  try { u = new URL(String(next), root); } catch { return null; }
-  if (u.origin !== root.origin) throw new ProviderError("La página siguiente apunta a otro servidor; se detuvo la importación.");
-  return { link: u.pathname + u.search, n };
+  // Hay más páginas: ¿se llegó a un límite? Entonces el listado NO está completo.
+  if (Number(pg.maxItems) > 0 && count >= Number(pg.maxItems)) return end("maxItems", true);
+  if (Number(pg.maxPages) > 0 && n >= Number(pg.maxPages)) return end("maxPages", true);
+  if (n >= MAX_PAGES) return end("hardLimit", true);
+  return { next: { ...raw, n, count, fp }, end: null };
 }
 
 function mapFields(row, map, prefixes = {}) {
@@ -293,7 +319,12 @@ export default {
     const vars = { ...pageVars(ep, cursor), since: sinceValue(since, ep.sinceFormat) };
     const root = base(ctx.config);
     const data = await call(ctx, spec, ep, vars, cursor?.link || "");
-    const rows = rowsOf(data, ep.items);
+    let rows;
+    try { rows = rowsOf(data, ep.items); }
+    catch (err) {
+      if (ep.pagination?.onInvalid === "partial") return { items: [], next: null, end: { reason: "invalid", anomaly: true } };
+      throw err;
+    }
     const lazy = Boolean(kind === "movie" || kind === "live" || kind === "anime" ? spec.resolve : false);
     const items = rows.map(row => {
       const m = mapFields(row, ep.map, ep.prefix);
@@ -301,7 +332,7 @@ export default {
       const hasEpisodes = kind === "series" || (kind === "anime" && Boolean(spec.episodes) && (m.hasEpisodes ?? !playback));
       return { ...m, kind, playback, hasEpisodes, data: { ...m.data, id: m.data.id ?? m.id } };
     });
-    const next = nextCursor(ep, cursor, data, rows.length, root, rows);
+    const { next, end } = nextCursor(ep, cursor, data, rows, root);
     // El enlace siguiente se guarda en la base: se le quitan los parámetros de autenticación
     // (se vuelven a agregar al pedirlo).
     if (next?.link) {
@@ -309,7 +340,7 @@ export default {
       for (const a of [].concat(spec.auth || [])) if (a.in === "query") u.searchParams.delete(a.name);
       next.link = u.pathname + u.search;
     }
-    return { items, next };
+    return { items, next, end };
   },
 
   // Episodios de una serie. Si la especificación tiene "seasons", primero pide las temporadas
@@ -329,17 +360,23 @@ export default {
     const ep = spec.episodes;
     const vars = { ...vars0, ...pageVars(ep, state.page), season: season ?? "" };
     const data = await call(ctx, spec, ep, vars);
-    const rows = rowsOf(data, ep.items);
+    let rows;
+    try { rows = rowsOf(data, ep.items); }
+    catch (err) {
+      if (ep.pagination?.onInvalid === "partial") return { episodes: [], next: null, end: { reason: "invalid", anomaly: true } };
+      throw err;
+    }
     const episodes = rows.map(row => {
       const m = mapFields(row, ep.map, ep.prefix);
       const playback = m.playback.url ? { url: m.playback.url, type: m.playback.type ?? ep.playbackType ?? "" } : spec.resolveEpisode ? { lazy: true } : null;
       return { ...m, season: m.season ?? season ?? ep.defaultSeason ?? 1, playback, data: { ...m.data, id: m.data.id ?? m.id } };
     });
-    const nextPage = nextCursor(ep, state.page, data, rows.length, base(ctx.config), rows);
+    const { next: nextPage, end } = nextCursor(ep, state.page, data, rows, base(ctx.config));
     let next = null;
     if (nextPage) next = { ...state, page: nextPage };
+    else if (end?.anomaly) return { episodes, next: null, end };
     else if (state.seasons && state.si + 1 < state.seasons.length) next = { seasons: state.seasons, si: state.si + 1 };
-    return { episodes, next };
+    return { episodes, next, end: next ? null : end };
   },
 
   async resolve(ctx, { source, episode }) {

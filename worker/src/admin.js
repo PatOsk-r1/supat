@@ -33,6 +33,7 @@ export function jobOut(j) {
   try { phase = JSON.parse(j.cursor_json || "{}").phase || ""; } catch { /* nada */ }
   return {
     id: j.id, providerId: j.provider_id, mode: j.mode, status: j.status, paused: Boolean(j.paused), phase, trigger: j.trigger,
+    outcome: j.outcome || "", outcomeDetail: j.outcome_detail || "",
     pages: j.pages, seen: j.seen, created: j.created, updated: j.updated, merged: j.merged, unchanged: j.unchanged,
     conflicts: j.conflicts, skipped: j.skipped, episodes: j.episodes, attempts: j.attempts, lastError: j.last_error,
     nextRunAt: j.next_run_at, createdAt: j.created_at, startedAt: j.started_at, finishedAt: j.finished_at

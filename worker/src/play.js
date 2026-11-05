@@ -62,25 +62,34 @@ export async function resolvePlayback(env, titleId, episodeId = null, { fetchImp
   for (const row of rows) {
     const providerRow = { id: row.pid, adapter: row.adapter, config_json: row.config_json, secrets_enc: row.secrets_enc };
     let secrets = {};
+    let ctxRef = null;
     try {
       const { def, ctx } = await contextFor(env, providerRow, { fetchImpl, budget: { left: 4 } });
       secrets = ctx.secrets;
+      ctxRef = ctx;
       let playback = normalizePlayback(JSON.parse(row.playback_json));
       let extras = {};
+      const sourceInfo = async () => {
+        const target = { externalId: row.external_id, data: JSON.parse(row.data_json || "{}") };
+        if (!episodeId) return { source: target, episode: null };
+        const series = await env.DB.prepare("SELECT external_id, data_json FROM title_sources WHERE title_id = ? AND provider_id = ? LIMIT 1").bind(row.title_id, row.pid).first();
+        return { source: series ? { externalId: series.external_id, data: JSON.parse(series.data_json || "{}") } : null, episode: { ...target, season: row.season, number: row.number } };
+      };
+      const titleIds = { tmdb: title?.tmdb_id ?? "", imdb: title?.imdb_id ?? "" };
       if (playback?.lazy) {
         if (!def.resolve) throw new Error("el adaptador no sabe pedir la fuente");
-        const target = { externalId: row.external_id, data: JSON.parse(row.data_json || "{}") };
-        let source = target, episode = null;
-        if (episodeId) {
-          const series = await env.DB.prepare("SELECT external_id, data_json FROM title_sources WHERE title_id = ? AND provider_id = ? LIMIT 1").bind(row.title_id, row.pid).first();
-          source = series ? { externalId: series.external_id, data: JSON.parse(series.data_json || "{}") } : null;
-          episode = { ...target, season: row.season, number: row.number };
-        }
-        const resolved = await def.resolve(ctx, { source, episode, title: { tmdb: title?.tmdb_id ?? "", imdb: title?.imdb_id ?? "" } });
+        const { source, episode } = await sourceInfo();
+        const resolved = await def.resolve(ctx, { source, episode, title: titleIds });
         playback = normalizePlayback(resolved);
         if (playback && resolved?.type === "embed") playback.type = "embed";
         extras = { subtitles: resolved?.subtitles || [], expiresAt: resolved?.expiresAt || null };
+      } else if (playback?.url && def.subtitlesFor) {
+        // Método directo: los subtítulos salen de plantillas o del catálogo (sin pedir nada).
+        const { source, episode } = await sourceInfo();
+        extras = { subtitles: def.subtitlesFor(ctx, { source, episode, title: titleIds }) };
       }
+      // Subtítulos con credenciales o direcciones inválidas se descartan.
+      extras.subtitles = (extras.subtitles || []).filter(t => /^https?:\/\//i.test(t.url || "") && !containsSecret(t.url, ctx.secrets));
       const why = checkUrl(playback, def, ctx.config, ctx.secrets);
       if (why) throw new Error(why);
       return {
@@ -91,6 +100,8 @@ export async function resolvePlayback(env, titleId, episodeId = null, { fetchImp
       };
     } catch (err) {
       const message = redact(err?.message || "error", secrets);
+      // Si la fuente pidió esperar (429), el resto del sistema (importación) también lo respeta.
+      if (err?.deferUntil && ctxRef?.saveState) await ctxRef.saveState().catch(() => {});
       problems.push(`${row.label}: ${message}`);
       await log(env, "warn", "play", `No se pudo obtener la fuente (título ${titleId}${episodeId ? `, episodio ${episodeId}` : ""}): ${message}`, { providerId: row.pid, secrets });
     }

@@ -14,6 +14,8 @@ import { ADAPTERS, contextFor, kindsOf } from "./providers/registry.js";
 import { normalizeTitle, normalizeEpisode, ProviderError, LIMITS } from "./providers/contract.js";
 import { upsertTitles, upsertEpisodes } from "./catalog.js";
 import { log } from "./log.js";
+import { getPriorities } from "./priorities.js";
+import { anomalyText } from "./providers/generic-http.js";
 import { redact } from "./secrets.js";
 
 const MAX_ATTEMPTS = 5;
@@ -88,9 +90,9 @@ async function claim(env, now, onlyJobId = null) {
 function saveJob(env, job, cursor, extra = {}) {
   const f = { ...job, ...extra };
   return env.DB.prepare(`UPDATE sync_jobs SET status = ?, cursor_json = ?, pages = ?, seen = ?, created = ?, updated = ?, merged = ?, unchanged = ?, conflicts = ?, skipped = ?, episodes = ?,
-    attempts = ?, next_run_at = ?, locked_until = ?, last_error = ?, finished_at = ?, stalls = 0 WHERE id = ?`)
+    attempts = ?, next_run_at = ?, locked_until = ?, last_error = ?, finished_at = ?, stalls = 0, outcome = ?, outcome_detail = ? WHERE id = ?`)
     .bind(f.status, JSON.stringify(cursor), f.pages, f.seen, f.created, f.updated, f.merged, f.unchanged, f.conflicts, f.skipped, f.episodes,
-      f.attempts, f.next_run_at, f.locked_until, String(f.last_error || "").slice(0, 500), f.finished_at ?? null, f.id).run();
+      f.attempts, f.next_run_at, f.locked_until, String(f.last_error || "").slice(0, 500), f.finished_at ?? null, f.outcome || "", String(f.outcome_detail || "").slice(0, 1000), f.id).run();
 }
 
 // Procesa una tanda de un trabajo ya tomado. Devuelve el trabajo actualizado.
@@ -122,8 +124,14 @@ export async function runJobStep(baseEnv, job, { fetchImpl = fetch, pages = Numb
   const { def, ctx } = ctxInfo;
   const kinds = kindsOf(def, ctx.config);
   const cursor = JSON.parse(job.cursor_json || "{}");
+  cursor.anomalies ||= [];
   const j = { ...job };
   let done = 0;
+  const priorities = await getPriorities(env, "active");
+  const policy = def.removalPolicy ? def.removalPolicy(ctx.config) : { percent: 10, min: 20 };
+  // Una anomalía (paginación incompleta, límite alcanzado, respuesta inválida, serie que no se pudo
+  // consultar) deja la importación PARCIAL: no se marcan bajas y no cuenta como sincronización completa.
+  const anomaly = (where, reason) => { if (cursor.anomalies.length < 50) cursor.anomalies.push({ where, reason }); };
 
   try {
     while (done < pages && Date.now() < deadline && counter.n < DB_BUDGET) {
@@ -134,7 +142,8 @@ export async function runJobStep(baseEnv, job, { fetchImpl = fetch, pages = Numb
         // Se procesa la página completa (sin recortar): el tamaño lo decide la especificación.
         const raw = Array.isArray(page?.items) ? page.items : [];
         const items = raw.map(r => normalizeTitle(r, kinds)).filter(Boolean);
-        const c = await upsertTitles(env, provider.id, items, { touchSeen: j.mode === "full" });
+        const c = await upsertTitles(env, provider.id, items, { touchSeen: j.mode === "full", priorities });
+        if (page?.end?.anomaly) anomaly(kind, page.end.reason);
         for (const note of c.conflictNotes.slice(0, 3)) await log(env, "warn", "duplicados", note, { providerId: provider.id, jobId: j.id });
         j.pages++; j.seen += raw.length; j.created += c.created; j.updated += c.updated; j.merged += c.merged; j.unchanged += c.unchanged; j.conflicts += c.conflicts; j.skipped += raw.length - items.length;
         if (page?.next) cursor.cursor = page.next;
@@ -153,8 +162,10 @@ export async function runJobStep(baseEnv, job, { fetchImpl = fetch, pages = Numb
           page = await def.listEpisodes(ctx, { source: src, cursor: cursor.ep?.cursor || null });
         } catch (err) {
           if (!(err instanceof ProviderError) || err.retryable) throw err;
-          // Falla permanente de UNA serie (por ejemplo 404): se registra y se sigue con las demás.
+          // Falla permanente de UNA serie (por ejemplo 404): se registra, se sigue con las demás y la
+          // importación queda PARCIAL (no se dan de baja episodios).
           await log(env, "warn", "episodes", `Episodios del título ${source.title_id} (${source.external_id}): ${redact(err.message, ctx.secrets)}`, { providerId: provider.id, jobId: j.id });
+          anomaly(`serie ${source.title_id}`, "seriesError");
           await env.DB.prepare("UPDATE title_sources SET episodes_synced_at = ? WHERE id = ?").bind(Date.now(), source.id).run();
           delete cursor.ep;
           j.skipped++;
@@ -162,7 +173,8 @@ export async function runJobStep(baseEnv, job, { fetchImpl = fetch, pages = Numb
           continue;
         }
         const episodes = (page?.episodes || []).map(normalizeEpisode).filter(Boolean);
-        const c = await upsertEpisodes(env, provider.id, source.title_id, episodes);
+        const c = await upsertEpisodes(env, provider.id, source.title_id, episodes, { touchSeen: j.mode === "full", priorities });
+        if (page?.end?.anomaly) anomaly(`serie ${source.title_id}`, page.end.reason);
         j.pages++; j.episodes += c.saved; j.skipped += (page?.episodes?.length || 0) - episodes.length;
         if (page?.next) cursor.ep = { id: source.id, cursor: page.next };
         else {
@@ -171,27 +183,56 @@ export async function runJobStep(baseEnv, job, { fetchImpl = fetch, pages = Numb
         }
         done++;
       } else {
-        // Fin: en la completa, lo que no apareció queda marcado como no disponible (no se borra).
+        // Fin. Resultado: completa, con advertencias o PARCIAL. Solo una completa sin anomalías
+        // evalúa ausencias (títulos y episodios), y nunca borra: marca "no disponible".
         const finished = Date.now();
         const statements = [];
-        if (j.mode === "full") {
-          // Protección: si faltarían más del 10% de los títulos activos (y más de 20), no se dan de
-          // baja: lo más probable es una respuesta incompleta de la fuente. Se confirman reiniciando
-          // la importación con "allowRemovals".
+        const notes = [];
+        const suspicious = (missing, active) => (missing > policy.min && missing > (active || 0) * policy.percent / 100);
+        if (j.mode === "full" && !cursor.anomalies.length) {
           const { active, missing } = await env.DB.prepare(`SELECT SUM(removed = 0) AS active, SUM(removed = 0 AND seen_at < ?) AS missing FROM title_sources WHERE provider_id = ?`)
             .bind(j.started_at, provider.id).first() || {};
-          const suspicious = (missing > 20 && missing > (active || 0) * 0.1) || (missing > 0 && j.seen === 0);
-          if (suspicious && !cursor.allowRemovals) {
-            await log(env, "warn", "sync", `Trabajo ${j.id}: la fuente no devolvió ${missing} de ${active} títulos; no se marcaron como no disponibles por precaución. Si las bajas son reales, reiniciá la importación confirmando las bajas.`, { providerId: provider.id, jobId: j.id });
-          } else {
+          if (missing && (suspicious(missing, active) || j.seen === 0) && !cursor.allowRemovals) {
+            anomaly("títulos", "removals");
+            notes.push(`la fuente no devolvió ${missing} de ${active} títulos; no se marcaron como no disponibles por precaución`);
+          } else if (missing) {
             statements.push(env.DB.prepare("UPDATE title_sources SET removed = 1 WHERE provider_id = ? AND removed = 0 AND seen_at < ?").bind(provider.id, j.started_at));
+            notes.push(`${missing} título(s) marcados como no disponibles en esta fuente`);
+          }
+          if (episodesOn(def, ctx.config) && !cursor.anomalies.length) {
+            // Solo series cuyos episodios se recorrieron completos en ESTA importación y que devolvieron al
+            // menos un episodio (una serie que de golpe devuelve cero no da de baja nada).
+            const scope = `FROM episode_sources es JOIN episodes e ON e.id = es.episode_id JOIN title_sources s ON s.title_id = e.title_id AND s.provider_id = es.provider_id
+              WHERE es.provider_id = ? AND s.removed = 0 AND s.episodes_synced_at >= ?
+              AND EXISTS (SELECT 1 FROM episode_sources es2 JOIN episodes e2 ON e2.id = es2.episode_id WHERE e2.title_id = e.title_id AND es2.provider_id = es.provider_id AND es2.seen_at >= ?)`;
+            const ep = await env.DB.prepare(`SELECT SUM(es.removed = 0) AS active, SUM(es.removed = 0 AND es.seen_at < ?) AS missing ${scope}`)
+              .bind(j.started_at, provider.id, j.started_at, j.started_at).first() || {};
+            if (ep.missing && suspicious(ep.missing, ep.active) && !cursor.allowRemovals) {
+              anomaly("episodios", "removals");
+              notes.push(`faltarían ${ep.missing} de ${ep.active} episodios; no se marcaron como no disponibles por precaución`);
+            } else if (ep.missing) {
+              statements.push(env.DB.prepare(`UPDATE episode_sources SET removed = 1 WHERE id IN (SELECT es.id ${scope} AND es.removed = 0 AND es.seen_at < ?)`)
+                .bind(provider.id, j.started_at, j.started_at, j.started_at));
+              notes.push(`${ep.missing} episodio(s) marcados como no disponibles en esta fuente (siguen visibles si otra fuente los ofrece)`);
+            }
           }
         }
-        statements.push(env.DB.prepare("UPDATE providers SET last_sync_at = ?, last_status = 'ok', last_error = '', updated_at = ? WHERE id = ?").bind(j.started_at, finished, provider.id));
+        const partial = cursor.anomalies.length > 0;
+        const warnings = !partial && (j.skipped > 0 || j.conflicts > 0);
+        const outcome = partial ? "partial" : warnings ? "warnings" : "complete";
+        const why = [...new Set(cursor.anomalies.map(a => `${a.where}: ${a.reason === "removals" ? "ausencias anormales" : a.reason === "seriesError" ? "no se pudieron consultar sus episodios" : anomalyText(a.reason)}`))].slice(0, 8);
+        const detail = partial ? `Importación PARCIAL — ${why.join("; ")}.${notes.length ? ` ${notes.join("; ")}.` : ""}`
+          : `${warnings ? `Completada con advertencias: ${j.skipped} registro(s) descartados, ${j.conflicts} posible(s) duplicado(s).` : "Completada."}${notes.length ? ` ${notes.join("; ")}.` : ""}`;
+        // Solo una importación completa (o con advertencias) cuenta como sincronización: la incremental
+        // siguiente pide cambios desde la última COMPLETA.
+        statements.push(partial
+          ? env.DB.prepare("UPDATE providers SET last_status = 'partial', last_error = ?, updated_at = ? WHERE id = ?").bind(detail.slice(0, 500), finished, provider.id)
+          : env.DB.prepare("UPDATE providers SET last_sync_at = ?, last_status = ?, last_error = '', updated_at = ? WHERE id = ?").bind(j.started_at, warnings ? "warning" : "ok", finished, provider.id));
         await env.DB.batch(statements);
-        Object.assign(j, { status: "done", locked_until: 0, finished_at: finished, last_error: "" });
+        Object.assign(j, { status: "done", locked_until: 0, finished_at: finished, last_error: "", outcome, outcome_detail: detail });
         await saveJob(env, j, cursor);
-        await log(env, "info", "sync", `Trabajo ${j.id} terminado: ${j.pages} páginas, ${j.seen} recibidos, ${j.created} nuevos, ${j.updated} actualizados, ${j.merged} unidos a títulos existentes, ${j.unchanged} sin cambios, ${j.episodes} episodios, ${j.skipped} descartados.`, { providerId: provider.id, jobId: j.id });
+        await ctx.saveState?.();
+        await log(env, partial ? "warn" : "info", "sync", `Trabajo ${j.id} terminado (${outcome}): ${j.pages} páginas, ${j.seen} recibidos, ${j.created} nuevos, ${j.updated} actualizados, ${j.merged} unidos, ${j.unchanged} sin cambios, ${j.episodes} episodios, ${j.skipped} descartados. ${detail}`, { providerId: provider.id, jobId: j.id });
         return j;
       }
       j.attempts = 0;
@@ -199,9 +240,18 @@ export async function runJobStep(baseEnv, job, { fetchImpl = fetch, pages = Numb
     }
     // Quedó trabajo pendiente: se libera el candado para la próxima ejecución.
     await saveJob(env, j, cursor, { status: "running", next_run_at: Date.now(), locked_until: 0 });
+    await ctx.saveState?.();
     return { ...j, status: "running" };
   } catch (err) {
     const message = redact(err?.message || "Error desconocido.", ctx.secrets);
+    await ctx.saveState?.();
+    // Límite de frecuencia: se pospone el trabajo hasta la hora permitida (persistente). Un 429 con
+    // "esperar y seguir" no gasta reintentos.
+    if (err?.deferUntil && !err.consumesAttempt) {
+      await saveJob(env, j, cursor, { status: "running", next_run_at: err.deferUntil, locked_until: 0, last_error: message });
+      await log(env, "info", "rate", `Trabajo ${j.id}: ${message}`, { providerId: provider.id, jobId: j.id, secrets: ctx.secrets });
+      return { ...j, status: "running", next_run_at: err.deferUntil };
+    }
     const budgetOut = err instanceof ProviderError && err.status === -1;
     if (budgetOut) {
       await saveJob(env, j, cursor, { status: "running", next_run_at: Date.now(), locked_until: 0 });
@@ -210,11 +260,11 @@ export async function runJobStep(baseEnv, job, { fetchImpl = fetch, pages = Numb
     const retryable = err instanceof ProviderError && err.retryable;
     const attempts = j.attempts + 1;
     // Reintentos configurables por fuente (Ajustes); si no, 5 intentos desde 1 minuto.
-    const policy = def.retryPolicy ? def.retryPolicy(ctx.config) : { max: MAX_ATTEMPTS, delayMs: 60000 };
-    if (retryable && attempts < policy.max) {
-      const wait = Math.min(6 * 3600e3, policy.delayMs * 2 ** (attempts - 1));
+    const retry = def.retryPolicy ? def.retryPolicy(ctx.config) : { max: MAX_ATTEMPTS, delayMs: 60000 };
+    if (retryable && attempts < retry.max) {
+      const wait = Math.max(Math.min(6 * 3600e3, retry.delayMs * 2 ** (attempts - 1)), (err.deferUntil || 0) - Date.now());
       await saveJob(env, j, cursor, { status: "running", attempts, next_run_at: Date.now() + wait, locked_until: 0, last_error: message });
-      await log(env, "warn", "sync", `Trabajo ${j.id}: ${message} Reintento ${attempts}/${policy.max - 1} en ${Math.round(wait / 1000)} s.`, { providerId: provider.id, jobId: j.id, secrets: ctx.secrets });
+      await log(env, "warn", "sync", `Trabajo ${j.id}: ${message} Reintento ${attempts}/${retry.max - 1} en ${Math.round(wait / 1000)} s.`, { providerId: provider.id, jobId: j.id, secrets: ctx.secrets });
       return { ...j, status: "running", attempts };
     }
     const finished = Date.now();

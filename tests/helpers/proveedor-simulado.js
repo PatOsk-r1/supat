@@ -61,6 +61,8 @@ export function providerNet(state = {}) {
     [`${BASE}/series/serie-a/seasons/1/episodes`]: () => ({ episodes: [{ id: "a-1-1", episode_number: 1, name: "Piloto", stream: "https://cdn.prov.ejemplo/a/1/1.m3u8" }, { id: "a-1-2", episode_number: 2, name: "Dos", stream: "https://cdn.prov.ejemplo/a/1/2.m3u8" }] }),
     [`${BASE}/series/serie-a/seasons/2/episodes`]: () => ({ episodes: [{ id: "a-2-1", episode_number: 1, name: "Vuelta", stream: "https://cdn.prov.ejemplo/a/2/1.m3u8" }] }),
     [`${BASE}/series/serie-a/seasons`]: () => ({ seasons: [{ season_number: 1 }, { season_number: 2 }] }),
+    // La serie B todavía no tiene temporadas publicadas (lista vacía). Con s.serieBMissing, 404.
+    [`${BASE}/series/serie-b/seasons`]: () => (s.serieBMissing ? { __status: 404, body: { error: "no existe" } } : { seasons: [] }),
     [`${BASE}/series`]: (u, init) => {
       if (u.pathname !== "/v1/series") return { __status: 404, body: { error: "no existe" } };
       if (auth(init)) return auth(init);

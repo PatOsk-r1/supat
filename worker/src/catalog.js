@@ -12,10 +12,9 @@
 
 const CHUNK = 90; // D1 acepta hasta 100 parámetros por consulta
 
-export function normalizeText(s) {
-  return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ").trim().slice(0, 300);
-}
+export { normalizeText } from "./catalog-text.js";
+import { normalizeText } from "./catalog-text.js";
+import { recomputeTitles, recomputeEpisodes } from "./priorities.js";
 
 // Huella corta y estable (FNV-1a de 64 bits en dos mitades).
 export function fingerprint(value) {
@@ -44,9 +43,16 @@ async function selectIn(env, sqlBefore, values, sqlAfter = "", extra = []) {
 
 const titleFields = t => [t.title, normalizeText(t.title + " " + t.originalTitle), t.originalTitle, t.year, t.description, t.poster, t.backdrop, JSON.stringify(t.categories), t.rating];
 
+// Valores descriptivos de una fuente (para las prioridades por campo: priorities.js).
+const titleMeta = t => ({ title: t.title, originalTitle: t.originalTitle, description: t.description, poster: t.poster, backdrop: t.backdrop,
+  categories: t.categories, year: t.year, rating: t.rating, releaseDate: t.data?.releaseDate ? String(t.data.releaseDate).slice(0, 40) : "" });
+const episodeMeta = e => ({ epTitle: e.title, epDescription: e.description, epStill: e.still, epDuration: e.duration || null });
+
 // Guarda una página de títulos ya normalizados (contract.normalizeTitle) de un proveedor.
+// Los datos descriptivos de cada fuente se guardan aparte (meta_json) y el título se recalcula
+// según la prioridad ACTIVA: ya no manda "la primera fuente que lo importó".
 // Devuelve los contadores de la tanda.
-export async function upsertTitles(env, providerId, items, { now = Date.now(), touchSeen = false } = {}) {
+export async function upsertTitles(env, providerId, items, { now = Date.now(), touchSeen = false, priorities = null } = {}) {
   const counts = { seen: items.length, created: 0, updated: 0, merged: 0, unchanged: 0, conflicts: 0, conflictNotes: [] };
   if (!items.length) return counts;
 
@@ -54,7 +60,7 @@ export async function upsertTitles(env, providerId, items, { now = Date.now(), t
   const byExt = new Map(items.map(t => [t.externalId, t]));
   items = [...byExt.values()];
 
-  const existing = new Map((await selectIn(env, "SELECT external_id, title_id, hash FROM title_sources WHERE provider_id = ? AND external_id IN", items.map(t => t.externalId), "", [providerId]))
+  const existing = new Map((await selectIn(env, "SELECT external_id, title_id, hash, meta_json != '' AS has_meta FROM title_sources WHERE provider_id = ? AND external_id IN", items.map(t => t.externalId), "", [providerId]))
     .map(r => [r.external_id, r]));
 
   const tmdbs = [...new Set(items.filter(t => t.tmdb).map(t => t.tmdb))];
@@ -87,29 +93,23 @@ export async function upsertTitles(env, providerId, items, { now = Date.now(), t
     return { sets, binds };
   };
 
+  const touched = []; // ids externos cuyo título hay que recalcular
   for (const t of items) {
     const hash = fingerprint(t);
     const playback = t.playback ? JSON.stringify(t.playback) : "";
     const data = JSON.stringify(t.data || {});
+    const meta = JSON.stringify(titleMeta(t));
     const src = existing.get(t.externalId);
+    if (!(src && src.hash === hash && src.has_meta)) touched.push(t.externalId);
 
     if (src) {
-      if (src.hash === hash) { counts.unchanged++; unchangedIds.push(t.externalId); continue; }
+      if (src.hash === hash && src.has_meta) { counts.unchanged++; unchangedIds.push(t.externalId); continue; }
       const row = linked.get(src.title_id) || { id: src.title_id };
-      const own = row.origin_provider === providerId;
       const { sets, binds } = claim(row, t);
-      // Si el título lo creó este proveedor, sus datos mandan; si no, solo completa lo que falta.
-      const f = titleFields(t);
-      const update = own
-        // La fuente que creó el título manda, pero un campo que ahora llega vacío NO borra el guardado.
-        ? `UPDATE titles SET title = ?, title_norm = ?, original_title = COALESCE(NULLIF(?, ''), original_title), year = COALESCE(?, year), description = COALESCE(NULLIF(?, ''), description),
-            poster = COALESCE(NULLIF(?, ''), poster), backdrop = COALESCE(NULLIF(?, ''), backdrop), categories_json = COALESCE(NULLIF(?, '[]'), categories_json), rating = COALESCE(?, rating),
-            has_episodes = MAX(has_episodes, ?), updated_at = ?${sets.map(s => ", " + s).join("")} WHERE id = ?`
-        : `UPDATE titles SET original_title = COALESCE(NULLIF(original_title, ''), ?), year = COALESCE(year, ?), description = COALESCE(NULLIF(description, ''), ?), poster = COALESCE(NULLIF(poster, ''), ?), backdrop = COALESCE(NULLIF(backdrop, ''), ?), rating = COALESCE(rating, ?), has_episodes = MAX(has_episodes, ?), updated_at = ?${sets.map(s => ", " + s).join("")} WHERE id = ?`;
-      const bind = own ? [...f, t.hasEpisodes ? 1 : 0, now, ...binds, row.id] : [t.originalTitle, t.year, t.description, t.poster, t.backdrop, t.rating, t.hasEpisodes ? 1 : 0, now, ...binds, row.id];
-      statements.push(env.DB.prepare(update).bind(...bind));
-      statements.push(env.DB.prepare("UPDATE title_sources SET playback_json = ?, data_json = ?, hash = ?, removed = 0, seen_at = ? WHERE provider_id = ? AND external_id = ?")
-        .bind(playback, data, hash, now, providerId, t.externalId));
+      statements.push(env.DB.prepare(`UPDATE titles SET has_episodes = MAX(has_episodes, ?), updated_at = ?${sets.map(x => ", " + x).join("")} WHERE id = ?`)
+        .bind(t.hasEpisodes ? 1 : 0, now, ...binds, row.id));
+      statements.push(env.DB.prepare("UPDATE title_sources SET playback_json = ?, data_json = ?, hash = ?, meta_json = ?, removed = 0, seen_at = ? WHERE provider_id = ? AND external_id = ?")
+        .bind(playback, data, hash, meta, now, providerId, t.externalId));
       counts.updated++;
       continue;
     }
@@ -124,10 +124,10 @@ export async function upsertTitles(env, providerId, items, { now = Date.now(), t
         counts.conflictNotes.push(`"${t.title}": TMDb ${t.tmdb} e IMDb ${t.imdb} están en títulos distintos (${byTmdb.get(tKey).id} y ${byImdb.get(t.imdb).id}).`);
       }
       const { sets, binds } = claim(match, t);
-      statements.push(env.DB.prepare(`UPDATE titles SET original_title = COALESCE(NULLIF(original_title, ''), ?), year = COALESCE(year, ?), description = COALESCE(NULLIF(description, ''), ?), poster = COALESCE(NULLIF(poster, ''), ?), backdrop = COALESCE(NULLIF(backdrop, ''), ?), has_episodes = MAX(has_episodes, ?), updated_at = ?${sets.map(s => ", " + s).join("")} WHERE id = ?`)
-        .bind(t.originalTitle, t.year, t.description, t.poster, t.backdrop, t.hasEpisodes ? 1 : 0, now, ...binds, match.id));
-      statements.push(env.DB.prepare("INSERT INTO title_sources (title_id, provider_id, external_id, playback_json, data_json, hash, seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-        .bind(match.id, providerId, t.externalId, playback, data, hash, now));
+      statements.push(env.DB.prepare(`UPDATE titles SET has_episodes = MAX(has_episodes, ?), updated_at = ?${sets.map(x => ", " + x).join("")} WHERE id = ?`)
+        .bind(t.hasEpisodes ? 1 : 0, now, ...binds, match.id));
+      statements.push(env.DB.prepare("INSERT INTO title_sources (title_id, provider_id, external_id, playback_json, data_json, hash, seen_at, meta_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(match.id, providerId, t.externalId, playback, data, hash, now, meta));
       counts.merged++;
       continue;
     }
@@ -137,22 +137,22 @@ export async function upsertTitles(env, providerId, items, { now = Date.now(), t
     const imdbFree = t.imdb && !pendingImdb.has(t.imdb);
     if (tKey && !tmdbFree) {
       // Otro elemento de esta misma tanda ya lo está creando: se une a ese.
-      statements.push(env.DB.prepare("INSERT INTO title_sources (title_id, provider_id, external_id, playback_json, data_json, hash, seen_at) VALUES ((SELECT id FROM titles WHERE tmdb_type = ? AND tmdb_id = ?), ?, ?, ?, ?, ?, ?)")
-        .bind(t.tmdbType, t.tmdb, providerId, t.externalId, playback, data, hash, now));
+      statements.push(env.DB.prepare("INSERT INTO title_sources (title_id, provider_id, external_id, playback_json, data_json, hash, seen_at, meta_json) VALUES ((SELECT id FROM titles WHERE tmdb_type = ? AND tmdb_id = ?), ?, ?, ?, ?, ?, ?, ?)")
+        .bind(t.tmdbType, t.tmdb, providerId, t.externalId, playback, data, hash, now, meta));
       counts.merged++;
       continue;
     }
     if (!tKey && t.imdb && !imdbFree) {
-      statements.push(env.DB.prepare("INSERT INTO title_sources (title_id, provider_id, external_id, playback_json, data_json, hash, seen_at) VALUES ((SELECT id FROM titles WHERE imdb_id = ?), ?, ?, ?, ?, ?, ?)")
-        .bind(t.imdb, providerId, t.externalId, playback, data, hash, now));
+      statements.push(env.DB.prepare("INSERT INTO title_sources (title_id, provider_id, external_id, playback_json, data_json, hash, seen_at, meta_json) VALUES ((SELECT id FROM titles WHERE imdb_id = ?), ?, ?, ?, ?, ?, ?, ?)")
+        .bind(t.imdb, providerId, t.externalId, playback, data, hash, now, meta));
       counts.merged++;
       continue;
     }
     statements.push(env.DB.prepare("INSERT INTO titles (kind, title, title_norm, original_title, year, description, poster, backdrop, categories_json, rating, tmdb_type, tmdb_id, imdb_id, has_episodes, origin_provider, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
       .bind(t.kind, ...titleFields(t), tKey ? t.tmdbType : null, tKey ? t.tmdb : null, imdbFree ? t.imdb : null, t.hasEpisodes ? 1 : 0, providerId, now, now));
     // Va justo después del INSERT del título: last_insert_rowid() es el título recién creado.
-    statements.push(env.DB.prepare("INSERT INTO title_sources (title_id, provider_id, external_id, playback_json, data_json, hash, seen_at) VALUES (last_insert_rowid(), ?, ?, ?, ?, ?, ?)")
-      .bind(providerId, t.externalId, playback, data, hash, now));
+    statements.push(env.DB.prepare("INSERT INTO title_sources (title_id, provider_id, external_id, playback_json, data_json, hash, seen_at, meta_json) VALUES (last_insert_rowid(), ?, ?, ?, ?, ?, ?, ?)")
+      .bind(providerId, t.externalId, playback, data, hash, now, meta));
     if (tKey) pendingTmdb.add(tKey);
     if (imdbFree) pendingImdb.add(t.imdb);
     counts.created++;
@@ -163,32 +163,47 @@ export async function upsertTitles(env, providerId, items, { now = Date.now(), t
     statements.push(env.DB.prepare(`UPDATE title_sources SET seen_at = ?, removed = 0 WHERE provider_id = ? AND external_id IN (${marks(part.length)})`).bind(now, providerId, ...part));
   }
   if (statements.length) await env.DB.batch(statements);
+  // Recalcular los títulos tocados según la prioridad activa (un campo vacío nunca borra otro).
+  if (touched.length) {
+    const ids = (await selectIn(env, "SELECT title_id FROM title_sources WHERE provider_id = ? AND external_id IN", touched, "", [providerId])).map(r => r.title_id);
+    counts.recomputed = await recomputeTitles(env, ids, priorities);
+  }
   return counts;
 }
 
-// Guarda episodios (contract.normalizeEpisode) de una serie, para la fuente `source` (fila de title_sources).
-export async function upsertEpisodes(env, providerId, titleId, episodes, { now = Date.now() } = {}) {
+// Guarda episodios (contract.normalizeEpisode) de una serie, para la fuente `providerId`.
+// touchSeen (importación completa): marca como vistos también los que no cambiaron, para poder
+// detectar después los que la fuente ya no devuelve.
+export async function upsertEpisodes(env, providerId, titleId, episodes, { now = Date.now(), touchSeen = false, priorities = null } = {}) {
   const counts = { seen: episodes.length, saved: 0, unchanged: 0 };
   if (!episodes.length) return counts;
   const byExt = new Map(episodes.map(e => [e.externalId, e]));
   episodes = [...byExt.values()];
-  const existing = new Map((await selectIn(env, "SELECT external_id, hash FROM episode_sources WHERE provider_id = ? AND external_id IN", episodes.map(e => e.externalId), "", [providerId]))
-    .map(r => [r.external_id, r.hash]));
+  const existing = new Map((await selectIn(env, "SELECT external_id, hash, meta_json != '' AS has_meta FROM episode_sources WHERE provider_id = ? AND external_id IN", episodes.map(e => e.externalId), "", [providerId]))
+    .map(r => [r.external_id, r]));
   const statements = [];
+  const unchanged = [];
   for (const e of episodes) {
     const hash = fingerprint(e);
-    if (existing.get(e.externalId) === hash) { counts.unchanged++; continue; }
+    const prev = existing.get(e.externalId);
+    if (prev && prev.hash === hash && prev.has_meta) { counts.unchanged++; unchanged.push(e.externalId); continue; }
     statements.push(env.DB.prepare(`INSERT INTO episodes (title_id, season, number, title, description, still, duration, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT (title_id, season, number) DO UPDATE SET title = COALESCE(NULLIF(excluded.title, ''), title), description = COALESCE(NULLIF(excluded.description, ''), description),
-      still = COALESCE(NULLIF(excluded.still, ''), still), duration = MAX(duration, excluded.duration), updated_at = excluded.updated_at`)
+      ON CONFLICT (title_id, season, number) DO NOTHING`)
       .bind(titleId, e.season, e.number, e.title, e.description, e.still, e.duration, now));
-    statements.push(env.DB.prepare(`INSERT INTO episode_sources (episode_id, provider_id, external_id, playback_json, data_json, hash, seen_at)
-      VALUES ((SELECT id FROM episodes WHERE title_id = ? AND season = ? AND number = ?), ?, ?, ?, ?, ?, ?)
-      ON CONFLICT (provider_id, external_id) DO UPDATE SET episode_id = excluded.episode_id, playback_json = excluded.playback_json, data_json = excluded.data_json, hash = excluded.hash, removed = 0, seen_at = excluded.seen_at`)
-      .bind(titleId, e.season, e.number, providerId, e.externalId, e.playback ? JSON.stringify(e.playback) : "", JSON.stringify(e.data || {}), hash, now));
+    statements.push(env.DB.prepare(`INSERT INTO episode_sources (episode_id, provider_id, external_id, playback_json, data_json, hash, seen_at, meta_json)
+      VALUES ((SELECT id FROM episodes WHERE title_id = ? AND season = ? AND number = ?), ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (provider_id, external_id) DO UPDATE SET episode_id = excluded.episode_id, playback_json = excluded.playback_json, data_json = excluded.data_json, hash = excluded.hash, meta_json = excluded.meta_json, removed = 0, seen_at = excluded.seen_at`)
+      .bind(titleId, e.season, e.number, providerId, e.externalId, e.playback ? JSON.stringify(e.playback) : "", JSON.stringify(e.data || {}), hash, now, JSON.stringify(episodeMeta(e))));
     counts.saved++;
   }
+  if (touchSeen) for (const part of chunks(unchanged, CHUNK - 2)) {
+    statements.push(env.DB.prepare(`UPDATE episode_sources SET seen_at = ?, removed = 0 WHERE provider_id = ? AND external_id IN (${marks(part.length)})`).bind(now, providerId, ...part));
+  }
   if (statements.length) await env.DB.batch(statements);
+  if (counts.saved) {
+    const { results } = await env.DB.prepare("SELECT id FROM episodes WHERE title_id = ?").bind(titleId).all();
+    await recomputeEpisodes(env, results.map(r => r.id), priorities);
+  }
   return counts;
 }
 

@@ -20,5 +20,11 @@ export const centralAdmin = {
   saveSource: (slot, body) => apiRequest("PUT", `/api/admin/sources/${slot}`, body),
   sourceAction: (slot, action, body = {}) => api.post(`/api/admin/sources/${slot}/${action}`, body),
   sourceErrors: slot => api.get(`/api/admin/sources/${slot}/errors`),
-  reindex: () => api.post("/api/admin/catalog/reindex")
+  reindex: () => api.post("/api/admin/catalog/reindex"),
+  // Prioridad de datos entre fuentes.
+  priorities: () => api.get("/api/admin/priorities"),
+  savePriorities: priorities => apiRequest("PUT", "/api/admin/priorities", { priorities }),
+  previewPriorities: priorities => api.post("/api/admin/priorities/preview", priorities ? { priorities } : {}),
+  applyPriorities: () => api.post("/api/admin/priorities/apply", { confirm: true }),
+  continuePriorities: () => api.post("/api/admin/priorities/continue")
 };

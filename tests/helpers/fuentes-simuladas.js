@@ -3,7 +3,7 @@
 //   Fuente A: API Key en encabezado, paginación por página, temporadas + episodios por temporada,
 //             reproducción pidiendo la URL a un endpoint con la credencial en un encabezado.
 //   Fuente B: token Bearer, paginación por offset con total de resultados, episodios en una sola
-//             lista, reproducción armando la URL con una plantilla (credencial dentro de la URL).
+//             lista, reproducción armando la URL con una plantilla (videos públicos, sin credencial).
 import { fakeNet } from "./api.js";
 import { BASE, KEY, PLAY_KEY, providerNet } from "./proveedor-simulado.js";
 import { FORM_KEYS } from "../../src/shared/fuente-esquema.js";
@@ -24,7 +24,7 @@ export const FORM_A = () => ({
   "ep.movie.path": "/movies", "ep.movie.items": "results",
   "ep.series.path": "/series", "ep.series.items": "data",
   "ep.seasons.path": "/series/{data.slug}/seasons", "ep.seasons.items": "seasons",
-  "ep.episodes.path": "/series/{data.slug}/seasons/{season}/episodes", "ep.episodes.items": "episodes", "ep.episodes.paged": "none",
+  "ep.episodes.path": "/series/{data.slug}/seasons/{season}/episodes", "ep.episodes.items": "episodes", "ep.episodes.page.type": "none",
   "page.type": "page", "page.pageParam": "page", "page.start": "1", "page.totalPagesPath": "total_pages", "page.sinceParam": "changed_since",
   "map.id": "id", "map.title": "title|name", "map.description": "overview", "map.poster": "poster_path", "map.year": "release_date|first_air_date",
   "map.tmdb": "ids.tmdb|tmdb_id", "map.imdb": "ids.imdb", "map.categories": "genres[].name", "map.extra": "slug=slug",
@@ -50,9 +50,9 @@ export const FORM_B = () => ({
   "map.tmdb": "external.tmdb", "map.imdb": "external.imdb", "img.posterPrefix": "https://img.otra.ejemplo",
   "epmap.id": "key", "epmap.season": "season", "epmap.number": "episode", "epmap.title": "name",
   "play.mode": "template", "play.baseUrl": VIDEO_B, "play.movieTemplate": `${VIDEO_B}/m/{id}.mp4`, "play.episodeTemplate": "/e/{seriesId}/{season}/{episode}.m3u8",
-  "play.keyIn": "url", "play.keyName": "t", "play.domains": VIDEO_B, "play.contentType": "video", "play.expiresSec": "600"
+  "play.domains": VIDEO_B, "play.contentType": "video", "play.expiresSec": "600"
 });
-export const SECRETS_B = { token: TOKEN_B, playbackKey: PLAY_KEY_B };
+export const SECRETS_B = { token: TOKEN_B };
 
 const FILMS_B = [
   { key: "b1", name: "La Película Uno (versión B)", released: "1999-05-01", img: "/p/b1.jpg", external: { tmdb: 101 } },   // misma que A (TMDb 101)
@@ -83,7 +83,7 @@ export function sourceBNet(state = {}) {
       return auth(init) || page(u, [{ key: "show-1", name: "Serie de B", external: { tmdb: 501 } }]);
     },
     // "Video" de la fuente B: responde al primer KB (para "Probar reproducción").
-    [`${VIDEO_B}/`]: (u) => (u.searchParams.get("t") === PLAY_KEY_B ? { __status: 206, body: "x" } : { __status: 403, body: "no" })
+    [`${VIDEO_B}/`]: (u) => (u.searchParams.has("t") ? { __status: 400, body: "no" } : { __status: 206, body: "x" })
   });
   net.state = s;
   return net;

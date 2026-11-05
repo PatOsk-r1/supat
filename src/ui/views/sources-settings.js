@@ -5,7 +5,8 @@ import { escapeHtml as e } from "../../app/util.js";
 import { SECTIONS, SLOTS } from "../../shared/fuente-esquema.js";
 
 const JOB_PHASE = { items: "títulos", episodes: "temporadas y episodios", finish: "cerrando" };
-const JOB_END = { done: "terminada", failed: "falló", cancelled: "cancelada" };
+const JOB_END = { done: "terminada", failed: "FALLIDA", cancelled: "cancelada" };
+const OUTCOME = { complete: "Completada", warnings: "Completada con advertencias", partial: "PARCIAL (no completa)" };
 const KIND_LABEL = { movie: "Películas", series: "Series", anime: "Anime", episodes: "Episodios" };
 
 const dateText = ts => (ts ? new Date(ts).toLocaleString("es", { dateStyle: "short", timeStyle: "short" }) : "nunca");
@@ -45,11 +46,16 @@ function field(slot, f, src) {
 function jobLine(src) {
   const job = src.activeJob, last = src.lastJob;
   if (job) {
-    return `${job.paused ? "<strong>en pausa</strong>" : "en curso"} (trabajo #${job.id}, ${job.mode === "full" ? "completa" : "cambios"}): ${e(JOB_PHASE[job.phase] || job.phase)} · ${job.pages} páginas · ${job.seen} recibidos · ${job.created} nuevos · ${job.merged} unidos · ${job.updated} actualizados · ${job.episodes} episodios`
+    const state = job.paused ? "<strong>Pausada</strong>" : job.status === "queued" ? "Pendiente" : job.nextRunAt > Date.now() + 5000 ? `En espera hasta ${dateText(job.nextRunAt)}` : "En curso";
+    return `${state} (trabajo #${job.id}, ${job.mode === "full" ? "completa" : "cambios"}): ${e(JOB_PHASE[job.phase] || job.phase)} · ${job.pages} páginas · ${job.seen} recibidos · ${job.created} nuevos · ${job.merged} unidos · ${job.updated} actualizados · ${job.episodes} episodios`
       + (job.attempts ? ` · reintento ${job.attempts} a las ${dateText(job.nextRunAt)}` : "")
       + (job.lastError ? `<span class="provider-error">${e(job.lastError)}</span>` : "");
   }
-  if (last) return `${JOB_END[last.status] || last.status} el ${dateText(last.finishedAt)}${last.lastError ? `<span class="provider-error">${e(last.lastError)}</span>` : ""}`;
+  if (last) {
+    const label = last.status === "done" ? OUTCOME[last.outcome] || "Terminada" : JOB_END[last.status] || last.status;
+    const detail = last.status === "done" ? last.outcomeDetail : last.lastError;
+    return `<strong>${label}</strong> el ${dateText(last.finishedAt)}${detail ? `<span class="${last.outcome === "partial" || last.status === "failed" ? "provider-error" : ""}">${e(detail)}</span>` : ""}`;
+  }
   return "todavía no se hizo";
 }
 
@@ -85,7 +91,7 @@ function card(ctx, slot) {
     <div class="provider-status ${src.lastTest ? (src.lastTest.ok ? "status-ok" : "status-error") : ""}" role="status">
       <strong>Conexión:</strong> ${src.lastTest ? `${src.lastTest.ok ? "✔ correcta" : "✖ con problemas"} (${dateText(src.lastTest.at)})<span>${e(src.lastTest.message)}</span>` : "sin probar"}
     </div>
-    <div class="provider-status ${src.lastStatus === "error" ? "status-error" : ""}" role="status" aria-live="polite"><strong>Importación:</strong> ${jobLine(src)}</div>
+    <div class="provider-status ${["error", "partial"].includes(src.lastStatus) ? "status-error" : ""}" role="status" aria-live="polite"><strong>Importación:</strong> ${jobLine(src)}</div>
 
     ${src.configured ? `<div class="provider-actions source-tools">
       ${act("test-connection", "Probar conexión")}

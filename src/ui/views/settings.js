@@ -3,6 +3,7 @@ import { escapeHtml as e } from "../../app/util.js";
 import { heading } from "../components.js";
 import { getInstance } from "../../providers/registry.js";
 import { sourcesSection } from "./sources-settings.js";
+import { prioritiesSection } from "./priorities-settings.js";
 
 function dateText(ts) {
   return ts ? new Date(ts).toLocaleString("es", { dateStyle: "short", timeStyle: "short" }) : "nunca";
@@ -27,7 +28,8 @@ function sourceSection(ctx) {
       ${ctx.account.isOwner && ctx.state.formMessage ? `<p class="note ok" role="status">${e(ctx.state.formMessage)}</p>` : ""}
       ${ctx.account.isOwner && ctx.state.busy ? `<p class="note" role="status">Procesando…</p>` : ""}
       ${ctx.account.isOwner ? sourcesSection(ctx) : `<p class="note">El catálogo es el mismo para todos los usuarios.</p>`}
-    </section>`;
+    </section>
+    ${ctx.account.isOwner ? `<section class="settings-block" aria-labelledby="h-prio"><h2 id="h-prio">Prioridad de datos entre fuentes</h2>${prioritiesSection(ctx)}</section>` : ""}`;
 }
 
 function confirmButton(ctx, action, label) {
@@ -91,6 +93,7 @@ export function render(ctx) {
     mount() {
       if (!ctx.account.isOwner) return () => {};
       if (!ctx.state.sources) ctx.loadSources?.();
+      if (!ctx.state.priorities) ctx.loadPriorities?.();
       const importing = () => Object.values(ctx.state.sources?.data || {}).some(s => s.activeJob && !s.activeJob.paused);
       const timer = setInterval(() => { if (importing() && !document.hidden) ctx.loadSources?.({ quiet: true }); }, 15000);
       return () => clearInterval(timer);

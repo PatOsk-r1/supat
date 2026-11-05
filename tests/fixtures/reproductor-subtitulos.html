@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Prueba de subtítulos</title>
+<link rel="stylesheet" href="/src/style.css"></head>
+<body style="background:#101014;color:#f5f5f7;padding:16px">
+<!-- Página de PRUEBA MANUAL (npm run dev → /tests/fixtures/reproductor-subtitulos.html).
+     Genera un video corto en el navegador (sin archivos ni red) y lo reproduce con el reproductor de
+     Supat, con un subtítulo WebVTT y otro SRT (que el reproductor convierte a WebVTT). -->
+<div class="player" id="player" style="max-width:720px"></div>
+<p id="estado">Generando video…</p>
+<script type="module">
+import { createPlayer } from "/src/player/player.js";
+async function makeVideo(seconds = 3) {
+  const canvas = Object.assign(document.createElement("canvas"), { width: 320, height: 180 });
+  const g = canvas.getContext("2d");
+  const rec = new MediaRecorder(canvas.captureStream(25), { mimeType: "video/webm" });
+  const chunks = [];
+  rec.ondataavailable = e => chunks.push(e.data);
+  rec.start();
+  const t0 = performance.now();
+  await new Promise(done => (function draw() {
+    const t = (performance.now() - t0) / 1000;
+    g.fillStyle = `hsl(${t * 120}, 60%, 40%)`; g.fillRect(0, 0, 320, 180);
+    g.fillStyle = "#fff"; g.font = "28px sans-serif"; g.fillText(`Prueba ${t.toFixed(1)} s`, 60, 100);
+    t < seconds ? setTimeout(draw, 40) : done(); // setTimeout (y no requestAnimationFrame): funciona aunque la pestaña esté oculta
+  })());
+  rec.stop();
+  await new Promise(r => (rec.onstop = r));
+  return URL.createObjectURL(new Blob(chunks, { type: "video/webm" }));
+}
+const url = await makeVideo();
+window.__player = createPlayer(document.querySelector("#player"), {
+  title: "Prueba de subtítulos", preference: "auto",
+  source: { url, type: "video/webm", subtitles: [
+    { url: `${location.origin}/tests/fixtures/sub-es.vtt`, lang: "es", label: "Español", format: "vtt" },
+    { url: `${location.origin}/tests/fixtures/sub-en.srt`, lang: "en", label: "English", format: "srt" }
+  ] }
+});
+document.querySelector("#estado").textContent = "Listo";
+</script>
+</body></html>
