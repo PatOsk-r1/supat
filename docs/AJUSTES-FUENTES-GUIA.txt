@@ -1,0 +1,397 @@
+GUÍA DE AJUSTES DE SUPAT: CÓMO SE USA CADA CAMPO DE "FUENTES DE CONTENIDO"
+(generada desde el formulario real de la app, 2026-11-05)
+
+INSTRUCCIONES PARA EL ASISTENTE (ChatGPT)
+- Te paso esta guía y la documentación técnica de una API de contenido.
+- Tu tarea es decirme qué valor poner en cada campo de esta guía, usando SOLO lo que diga la documentación.
+- Respondé con una lista de "Nombre del campo = valor" agrupada por sección, en el mismo orden que esta guía.
+- Los campos que no hacen falta, dejalos fuera o poné "dejar vacío".
+- Si la documentación no aclara algo, poné "no informado". No inventes rutas, parámetros ni nombres de campos.
+- NO completes los campos marcados SECRETO con valores: escribí solo "cargar la clave de la fuente". Esos los completo yo.
+- Si la API necesita algo que esta guía no permite, avisalo aparte en una sección "No soportado". Por ejemplo: XML, OAuth, firma de solicitudes, detalle por título, episodios dentro de la serie, temporadas con ID interno, transformar datos o valores fijos.
+
+----------------------------------------------------------------------
+CÓMO FUNCIONA (resumen)
+----------------------------------------------------------------------
+- Supat tiene dos fuentes, "Fuente A" y "Fuente B". Cada una tiene su tarjeta en Ajustes → Fuentes de contenido, con las mismas secciones.
+- Un servidor importa el catálogo de la API y lo guarda en la base de Supat. El navegador nunca habla con la API del catálogo.
+- El video lo reproduce el navegador directo desde la URL que se obtenga, así que esa URL tiene que funcionar SIN encabezados, SIN cookies y SIN credenciales dentro.
+- Las respuestas de la API tienen que ser JSON.
+
+CÓMO SE ESCRIBEN LAS RUTAS DENTRO DEL JSON (campos que dicen "Ruta ...", "map.*", "epmap.*")
+- Campo simple: title
+- Campo anidado: info.title
+- Primer elemento de una lista: images[0].url
+- Todos los elementos de una lista (por ejemplo géneros): genres[].name
+- Alternativas (si falta la primera, usa la segunda): title|name
+- En el mapeo, las rutas son relativas a CADA resultado de la lista, no a la respuesta completa.
+- "Ruta del array de resultados" es la ruta, desde la respuesta completa, hasta la lista. Vacío significa que la respuesta ya es la lista.
+
+VARIABLES QUE SE PUEDEN USAR EN RUTAS, PARÁMETROS Y PLANTILLAS
+- {id}: id del título (en los endpoints de temporadas y episodios, es el id de la SERIE).
+- {seriesId}: id de la serie (en las plantillas de reproducción de episodios).
+- {season}: número de temporada.
+- {episode}: número de episodio.
+- {tmdb}: id de TMDb.
+- {imdb}: id de IMDb.
+- {lang}: valor del campo "Idioma: valor".
+- {data.campo}: cualquier campo guardado con "Otros campos". Por ejemplo, con slug=info.slug se usa {data.slug}.
+
+FORMATO DE LOS CAMPOS DE VARIAS LÍNEAS ("nombre=valor")
+  Una por línea, por ejemplo:
+  language=es
+  sort=updated
+
+EJEMPLO COMPLETO (API inventada, solo para entender el formato)
+  La documentación dice:
+    GET https://api.ejemplo.com/v2/movies?page=1&limit=50
+    Encabezado: X-Api-Key: <clave>
+    Respuesta: { "data": [ { "id": 12, "name": "Película", "tmdb_id": 550, "poster": "/p/12.jpg" } ],
+                 "meta": { "current_page": 1, "last_page": 40 } }
+  Se completa:
+    URL base de la API = https://api.ejemplo.com/v2
+    Tipo de autenticación = API Key en un encabezado
+    Nombre del encabezado o parámetro de la API Key = X-Api-Key
+    API Key = (SECRETO: la carga el dueño)
+    Importar películas = sí
+    Endpoint de películas → Ruta = /movies
+    Endpoint de películas → Ruta del array de resultados = data
+    Tipo de paginación = Número de página
+    Parámetro de página = page
+    Parámetro de resultados por página = limit
+    Resultados por página = 50
+    Primera página = 1
+    Ruta de la información de paginación = meta
+    Ruta del total de páginas = last_page
+    ID del contenido = id
+    Título = name
+    TMDb ID = tmdb_id
+    Póster = poster
+    Prefijo de pósters con ruta relativa = https://img.ejemplo.com
+
+QUÉ NO ES COMPATIBLE CON LA REPRODUCCIÓN (no se puede resolver con ajustes)
+- La credencial tiene que ir dentro de la URL del video que abre el navegador.
+- El servidor de video exige encabezados (por ejemplo Authorization) o cookies.
+- El video no permite CORS (para HLS, el navegador tiene que poder leerlo).
+- DRM (Widevine, FairPlay, PlayReady).
+
+======================================================================
+SECCIÓN: IDENTIFICACIÓN Y CONEXIÓN
+======================================================================
+- Nombre interno  [texto]  (clave interna: internalName)
+    Solo para vos (registros y panel).
+- Nombre visible  [texto]  (clave interna: displayName)
+    Lo ven los usuarios al elegir la fuente de reproducción.
+- URL base de la API  [dirección https]  (clave interna: baseUrl)
+    Tiene que ser https.
+- Método de conexión (HTTP por defecto)  [lista para elegir]  (clave interna: httpMethod)
+      · GET  (valor: GET)
+      · POST  (valor: POST)
+- Tiempo máximo por consulta (segundos)  [número]  (clave interna: timeoutSec)
+    Entre 2 y 30.
+    Si se deja vacío: 15
+- Reintentos ante errores temporales  [número]  (clave interna: retryMax)
+    Entre 1 y 10.
+    Si se deja vacío: 5
+- Espera inicial entre reintentos (segundos)  [número]  (clave interna: retryDelaySec)
+    Se duplica en cada reintento.
+    Si se deja vacío: 60
+- Pausa mínima entre consultas (milisegundos)  [número]  (clave interna: minIntervalMs)
+    Se respeta también entre tandas y ejecuciones del servidor.
+    Si se deja vacío: 0
+- Ventana de límite de solicitudes (segundos)  [número]  (clave interna: rate.windowSec)
+    Junto con el campo siguiente: como máximo N solicitudes cada tantos segundos.
+- Solicitudes máximas por ventana  [número]  (clave interna: rate.windowMax)
+- Respetar la espera que indique el servidor (Retry-After)  [casilla (sí/no)]  (clave interna: rate.honorRetryAfter)
+- Ante "demasiadas solicitudes" (429)  [lista para elegir]  (clave interna: rate.on429)
+      · Esperar y seguir, sin gastar reintentos  (valor: wait)
+      · Contarlo como un reintento  (valor: retry)
+- Espera máxima aceptada (segundos)  [número]  (clave interna: rate.maxWaitSec)
+    Tope para la espera del servidor y entre reintentos.
+    Si se deja vacío: 3600
+- Umbral de bajas (%)  [número]  (clave interna: safety.removalPercent)
+    Si una importación completa dejaría sin ver más de este porcentaje de títulos o de episodios de una serie, no se marca ninguna baja y queda parcial.
+    Si se deja vacío: 10
+- Bajas mínimas para aplicar el umbral  [número]  (clave interna: safety.removalMin)
+    Si se deja vacío: 20
+
+======================================================================
+SECCIÓN: AUTENTICACIÓN
+======================================================================
+- Tipo de autenticación  [lista para elegir]  (clave interna: authType)
+      · Ninguna  (valor: none)
+      · API Key en un encabezado  (valor: apiKeyHeader)
+      · API Key en un parámetro  (valor: apiKeyQuery)
+      · Token (Authorization: Bearer)  (valor: bearer)
+      · Usuario y contraseña (básica)  (valor: basic)
+      · Inicio de sesión: usuario y contraseña → token  (valor: login)
+      · Solo encabezados/parámetros personalizados  (valor: custom)
+- Inicio de sesión: ruta  [texto]  (clave interna: login.path)
+    Relativa a la URL base. Se manda por POST.
+- Inicio de sesión: formato del cuerpo  [lista para elegir]  (clave interna: login.format)
+      · JSON  (valor: json)
+      · Formulario (x-www-form-urlencoded)  (valor: form)
+- Inicio de sesión: nombre del campo de usuario  [texto]  (clave interna: login.userField)
+    Valor sugerido: username
+- Inicio de sesión: nombre del campo de contraseña  [texto]  (clave interna: login.passField)
+    Valor sugerido: password
+- Inicio de sesión: otros campos  [varias líneas nombre=valor]  (clave interna: login.extra)
+    Una por línea, nombre=valor (no secretos).
+- Inicio de sesión: ruta del token en la respuesta  [texto]  (clave interna: login.tokenPath)
+- Inicio de sesión: ruta del vencimiento (segundos o fecha)  [texto]  (clave interna: login.expiresPath)
+- Duración del token si la respuesta no la informa (segundos)  [número]  (clave interna: login.ttlSec)
+    Si se deja vacío: 3600
+- Encabezado donde va el token  [texto]  (clave interna: login.header)
+    Valor sugerido: Authorization
+- Prefijo del token  [texto]  (clave interna: login.prefix)
+    Valor sugerido: Bearer 
+- Nombre del encabezado o parámetro de la API Key  [texto]  (clave interna: apiKeyName)
+- API Key  [SECRETO (se guarda cifrado; no se muestra nunca más)]  (clave interna: apiKey)
+- Token  [SECRETO (se guarda cifrado; no se muestra nunca más)]  (clave interna: token)
+- Usuario  [SECRETO (se guarda cifrado; no se muestra nunca más)]  (clave interna: username)
+- Contraseña  [SECRETO (se guarda cifrado; no se muestra nunca más)]  (clave interna: password)
+- Encabezados personalizados (secretos)  [varias líneas nombre=valor (SECRETO, cifrado)]  (clave interna: authHeaders)
+    Una por línea, con el formato nombre=valor. Se envían en todas las consultas al catálogo.
+- Parámetros de autenticación adicionales (secretos)  [varias líneas nombre=valor (SECRETO, cifrado)]  (clave interna: authParams)
+    Una por línea, con el formato nombre=valor. Se agregan a todas las consultas al catálogo.
+
+======================================================================
+SECCIÓN: CATÁLOGO
+======================================================================
+- Importar películas  [casilla (sí/no)]  (clave interna: cat.movie)
+- Importar series  [casilla (sí/no)]  (clave interna: cat.series)
+- Importar anime  [casilla (sí/no)]  (clave interna: cat.anime)
+- Importar temporadas y episodios  [casilla (sí/no)]  (clave interna: cat.episodes)
+
+ENDPOINTS DEL CATÁLOGO. Hay seis bloques iguales:
+  * Endpoint de películas
+  * Endpoint de series
+  * Endpoint de anime
+  * Endpoint de temporadas (opcional)
+      Admite {id} (serie) y {data.campo}. Si está, los episodios se piden por temporada con {season}.
+  * Endpoint de episodios
+      Admite {id} (serie), {season} y {data.campo}.
+  * Endpoint de prueba de conexión (opcional)
+      Si está vacío, se usa la primera página del catálogo.
+
+Cada bloque tiene estos campos (la clave interna empieza con ep.movie, ep.series, ep.anime, ep.seasons, ep.episodes o ep.test):
+- Ruta (relativa a la URL base)  [texto]  (clave interna: ep.<endpoint>.path)
+    Empieza con "/". 
+- Método HTTP  [lista para elegir]  (clave interna: ep.<endpoint>.method)
+      · El método general
+      · GET  (valor: GET)
+      · POST  (valor: POST)
+- Paginación de este endpoint  [lista para elegir]  (clave interna: ep.<endpoint>.page.type)
+      · Usar la paginación general
+      · Sin paginación  (valor: none)
+      · Número de página  (valor: page)
+      · Desplazamiento (offset)  (valor: offset)
+      · Cursor  (valor: cursor)
+      · Enlace a la página siguiente  (valor: link)
+- Parámetro de página / offset / cursor (de este endpoint)  [texto]  (clave interna: ep.<endpoint>.page.param)
+    Vacío = el de la paginación general.
+- Parámetro de resultados por página (de este endpoint)  [texto]  (clave interna: ep.<endpoint>.page.sizeParam)
+- Resultados por página (de este endpoint)  [número]  (clave interna: ep.<endpoint>.page.size)
+- Ruta del cursor o enlace siguiente (de este endpoint)  [texto]  (clave interna: ep.<endpoint>.page.nextPath)
+- Ruta del indicador de última página (de este endpoint)  [texto]  (clave interna: ep.<endpoint>.page.lastPagePath)
+- Ruta del total de páginas (de este endpoint)  [texto]  (clave interna: ep.<endpoint>.page.totalPagesPath)
+- Ruta del total de resultados (de este endpoint)  [texto]  (clave interna: ep.<endpoint>.page.totalResultsPath)
+- Máximo de páginas  [número]  (clave interna: ep.<endpoint>.page.maxPages)
+    Si se alcanza, la importación queda PARCIAL (no completa).
+- Máximo de registros  [número]  (clave interna: ep.<endpoint>.page.maxItems)
+    Si se alcanza, la importación queda PARCIAL.
+- Si una página llega vacía  [lista para elegir]  (clave interna: ep.<endpoint>.page.onEmpty)
+    Si la fuente informa un total y todavía faltaban registros, siempre queda parcial.
+      · Es el fin del listado  (valor: end)
+      · Marcar la importación como parcial  (valor: partial)
+- Si una página llega repetida  [lista para elegir]  (clave interna: ep.<endpoint>.page.onRepeat)
+      · Detener y marcar la importación como parcial  (valor: partial)
+      · Es el fin del listado  (valor: end)
+- Si la respuesta no trae la lista esperada  [lista para elegir]  (clave interna: ep.<endpoint>.page.onInvalid)
+      · La importación falla  (valor: fail)
+      · Detener ese endpoint y marcar parcial  (valor: partial)
+- Ruta del array de resultados en la respuesta  [texto]  (clave interna: ep.<endpoint>.items)
+    Por ejemplo data.results. Vacío = la respuesta es el array.
+- Parámetros  [varias líneas nombre=valor]  (clave interna: ep.<endpoint>.params)
+    Una por línea, con el formato nombre=valor. Admiten {id}, {seriesId}, {season}, {episode}, {tmdb}, {imdb}, {lang}, {data.campo}.
+- Encabezados (no secretos)  [varias líneas nombre=valor]  (clave interna: ep.<endpoint>.headers)
+    Una por línea, con el formato nombre=valor.
+
+======================================================================
+SECCIÓN: PAGINACIÓN
+======================================================================
+- Tipo de paginación  [lista para elegir]  (clave interna: page.type)
+      · Sin paginación  (valor: none)
+      · Número de página  (valor: page)
+      · Desplazamiento (offset)  (valor: offset)
+      · Cursor  (valor: cursor)
+      · Enlace a la página siguiente  (valor: link)
+- Parámetro de página / offset / cursor  [texto]  (clave interna: page.pageParam)
+- Parámetro de resultados por página  [texto]  (clave interna: page.sizeParam)
+- Resultados por página  [número]  (clave interna: page.size)
+- Primera página  [número]  (clave interna: page.start)
+    Si se deja vacío: 1
+- Ruta de la información de paginación  [texto]  (clave interna: page.infoPath)
+    Prefijo de las rutas de abajo, por ejemplo meta. Vacío = la raíz de la respuesta.
+- Ruta del cursor o enlace siguiente  [texto]  (clave interna: page.nextPath)
+- Ruta del indicador de última página  [texto]  (clave interna: page.lastPagePath)
+    Un valor verdadero corta la importación de ese endpoint.
+- Ruta del total de páginas  [texto]  (clave interna: page.totalPagesPath)
+- Ruta del total de resultados  [texto]  (clave interna: page.totalResultsPath)
+- Parámetro de "cambios desde" (incremental)  [texto]  (clave interna: page.sinceParam)
+    Si la fuente permite pedir solo lo modificado desde una fecha.
+- Formato de esa fecha  [lista para elegir]  (clave interna: page.sinceFormat)
+      · ISO 8601  (valor: iso)
+      · Fecha (AAAA-MM-DD)  (valor: date)
+      · Segundos Unix  (valor: unix)
+      · Milisegundos Unix  (valor: unixms)
+
+======================================================================
+SECCIÓN: MAPEO DE RESPUESTAS
+======================================================================
+- ID del contenido  [texto]  (clave interna: map.id)
+    Rutas dentro de cada resultado: a.b, a[0].b, lista[].nombre; alternativas con |.
+- Tipo de contenido  [texto]  (clave interna: map.type)
+    Se guarda como dato; el tipo lo define el endpoint.
+- TMDb ID  [texto]  (clave interna: map.tmdb)
+- IMDb ID  [texto]  (clave interna: map.imdb)
+- Título  [texto]  (clave interna: map.title)
+- Título original  [texto]  (clave interna: map.originalTitle)
+- Descripción  [texto]  (clave interna: map.description)
+- Póster  [texto]  (clave interna: map.poster)
+- Backdrop  [texto]  (clave interna: map.backdrop)
+- Año  [texto]  (clave interna: map.year)
+- Fecha de estreno  [texto]  (clave interna: map.releaseDate)
+- Géneros o categorías  [texto]  (clave interna: map.categories)
+- Puntaje (0 a 10)  [texto]  (clave interna: map.rating)
+- Cantidad de temporadas  [texto]  (clave interna: map.seasonsCount)
+- Cantidad de episodios  [texto]  (clave interna: map.episodesCount)
+- Fecha de actualización  [texto]  (clave interna: map.updatedAt)
+- URL de reproducción (si la trae el catálogo)  [texto]  (clave interna: map.playbackUrl)
+    Solo para el método de reproducción "directo".
+- URL de subtítulos (si la trae el catálogo)  [texto]  (clave interna: map.subtitleUrl)
+    WebVTT o SRT. Idioma: el de "Subtítulos: idioma por defecto".
+- Otros campos  [varias líneas nombre=valor]  (clave interna: map.extra)
+    Una por línea, con el formato nombre=valor. nombre=ruta. Se guardan y se pueden usar como {data.nombre}.
+- Prefijo de pósters con ruta relativa  [texto]  (clave interna: img.posterPrefix)
+- Prefijo de backdrops con ruta relativa  [texto]  (clave interna: img.backdropPrefix)
+- Temporadas: número de temporada  [texto]  (clave interna: season.number)
+    Dentro de cada resultado del endpoint de temporadas.
+- Episodios: ID  [texto]  (clave interna: epmap.id)
+- Episodios: número de temporada  [texto]  (clave interna: epmap.season)
+- Episodios: número de episodio  [texto]  (clave interna: epmap.number)
+- Episodios: título  [texto]  (clave interna: epmap.title)
+- Episodios: descripción  [texto]  (clave interna: epmap.description)
+- Episodios: imagen  [texto]  (clave interna: epmap.still)
+- Episodios: duración (segundos)  [texto]  (clave interna: epmap.duration)
+- Episodios: URL de reproducción (método directo)  [texto]  (clave interna: epmap.playbackUrl)
+- Episodios: URL de subtítulos  [texto]  (clave interna: epmap.subtitleUrl)
+- Episodios: otros campos  [varias líneas nombre=valor]  (clave interna: epmap.extra)
+    Una por línea, con el formato nombre=valor. nombre=ruta.
+- Prefijo de imágenes de episodios  [texto]  (clave interna: img.stillPrefix)
+
+======================================================================
+SECCIÓN: REPRODUCCIÓN
+======================================================================
+- Método de reproducción  [lista para elegir]  (clave interna: play.mode)
+      · Sin configurar
+      · Armar la URL (plantilla o parámetros)  (valor: template)
+      · Pedir la URL a un endpoint  (valor: api)
+      · La URL viene en el catálogo  (valor: direct)
+- URL base de reproducción  [dirección https]  (clave interna: play.baseUrl)
+    Vacía = la URL base de la API.
+- Plantilla de URL de películas  [texto]  (clave interna: play.movieTemplate)
+    Ruta o URL completa. Admite {id}, {seriesId}, {season}, {episode}, {tmdb}, {imdb}, {lang}, {data.campo}.
+- Plantilla de URL de episodios  [texto]  (clave interna: play.episodeTemplate)
+    Admite {id}, {seriesId}, {season}, {episode}, {tmdb}, {imdb}, {lang}, {data.campo}.
+- Parámetro del identificador de película  [texto]  (clave interna: play.movieIdParam)
+- Parámetro del identificador de serie  [texto]  (clave interna: play.seriesIdParam)
+- Parámetro de temporada  [texto]  (clave interna: play.seasonParam)
+- Parámetro de episodio  [texto]  (clave interna: play.episodeParam)
+- Parámetros adicionales  [varias líneas nombre=valor]  (clave interna: play.params)
+    Una por línea, con el formato nombre=valor. Admiten {id}, {seriesId}, {season}, {episode}, {tmdb}, {imdb}, {lang}, {data.campo}.
+- Encabezados para pedir la URL (no secretos)  [varias líneas nombre=valor]  (clave interna: play.headers)
+    Una por línea, con el formato nombre=valor. Solo en el método "endpoint". El navegador no puede mandar encabezados al reproducir.
+- Endpoint de reproducción de películas  [texto]  (clave interna: play.apiPath)
+    Método "endpoint". Ruta relativa a la URL base de reproducción.
+- Endpoint de reproducción de episodios  [texto]  (clave interna: play.apiEpisodePath)
+- Método HTTP del endpoint de reproducción  [lista para elegir]  (clave interna: play.apiMethod)
+      · El método general
+      · GET  (valor: GET)
+      · POST  (valor: POST)
+- Ruta de la URL en la respuesta  [texto]  (clave interna: play.urlPath)
+- Ruta del formato en la respuesta (opcional)  [texto]  (clave interna: play.typePath)
+- Ruta del vencimiento en la respuesta (opcional)  [texto]  (clave interna: play.expiresPath)
+    Segundos que dura el enlace, o una fecha.
+- Credencial de reproducción  [SECRETO (se guarda cifrado; no se muestra nunca más)]  (clave interna: playbackKey)
+    Solo se usa para obtener o habilitar los enlaces de reproducción.
+- Dónde va la credencial de reproducción  [lista para elegir]  (clave interna: play.keyIn)
+    Solo la usa el servidor para pedir el enlace. Si la fuente exige la credencial dentro de la URL del video, no es compatible con reproducción directa.
+      · No se usa
+      · Encabezado (método endpoint)  (valor: header)
+      · Parámetro (método endpoint)  (valor: query)
+      · Cuerpo JSON (método endpoint)  (valor: body)
+- Nombre del encabezado o parámetro de la credencial  [texto]  (clave interna: play.keyName)
+- El servidor de video exige encabezados propios  [casilla (sí/no)]  (clave interna: play.requiresHeaders)
+    El navegador no puede enviarlos de forma segura: la fuente queda como NO compatible con reproducción directa.
+- El servidor de video exige cookies  [casilla (sí/no)]  (clave interna: play.requiresCookies)
+    No compatible con reproducción directa.
+- Dominios de reproducción permitidos  [una por línea]  (clave interna: play.domains)
+    Uno por línea (https://dominio). Los enlaces de otros dominios se rechazan. Obligatorio para reproductores externos.
+- Tipo de contenido  [lista para elegir]  (clave interna: play.contentType)
+      · Video (reproductor de Supat)  (valor: video)
+      · Reproductor externo (iframe)  (valor: embed)
+- Formato de video  [lista para elegir]  (clave interna: play.format)
+      · Detectar
+      · HLS (.m3u8)  (valor: hls)
+      · MP4  (valor: mp4)
+      · WebM  (valor: webm)
+- Subtítulos: ruta de la lista en la respuesta  [texto]  (clave interna: play.subtitlesPath)
+    Método endpoint. Cada elemento con url (WebVTT), idioma y etiqueta.
+- Subtítulos: campo de la URL  [texto]  (clave interna: play.subtitleUrl)
+    Valor sugerido: url
+- Subtítulos: campo del idioma  [texto]  (clave interna: play.subtitleLang)
+    Valor sugerido: lang
+- Subtítulos: campo de la etiqueta  [texto]  (clave interna: play.subtitleLabel)
+    Valor sugerido: label
+- Subtítulos: plantilla de URL para películas  [texto]  (clave interna: play.subtitleMovieTemplate)
+    Admite {id}, {tmdb}, {imdb}, {lang} y {data.campo}. Se arma una por cada idioma de la lista de abajo.
+- Subtítulos: plantilla de URL para episodios  [texto]  (clave interna: play.subtitleEpisodeTemplate)
+    Admite además {seriesId}, {season} y {episode}.
+- Subtítulos: idiomas  [varias líneas nombre=valor]  (clave interna: play.subtitleLangs)
+    Una por línea: código=Nombre visible (por ejemplo es=Español).
+- Subtítulos: idioma por defecto (URL del catálogo)  [texto]  (clave interna: play.subtitleDefaultLang)
+- Idioma: nombre del parámetro  [texto]  (clave interna: play.langParam)
+- Idioma: valor  [texto]  (clave interna: play.langValue)
+    También disponible como {lang}.
+- Duración de los enlaces (segundos)  [número]  (clave interna: play.expiresSec)
+    Si los enlaces vencen y la respuesta no lo informa. Supat pide uno nuevo al reintentar.
+
+======================================================================
+OTRA PANTALLA: PRIORIDAD DE DATOS (Ajustes, debajo de las fuentes)
+======================================================================
+Si un mismo título está en las dos fuentes (se une por TMDb o IMDb, nunca por el nombre), acá se elige qué fuente manda en cada dato. Si la fuente elegida no tiene ese dato, se usa la otra. Un dato vacío nunca borra uno existente.
+Campos: Título · Título original · Sinopsis · Póster · Imagen de fondo · Géneros · Año · Fecha de estreno · Puntaje · Título del episodio · Sinopsis del episodio · Imagen del episodio · Duración del episodio.
+Cada uno ofrece "Fuente A primero" o "Fuente B primero".
+- "Guardar prioridades (sin aplicar)" guarda la elección pero todavía no cambia datos.
+- "Vista previa" muestra qué cambiaría.
+- "Aplicar a todo el catálogo" pide confirmación y lo aplica por tandas ("Continuar" sigue si queda a medias).
+
+======================================================================
+BOTONES DE CADA TARJETA DE FUENTE (en este orden)
+======================================================================
+1. Guardar configuración: valida y dice qué falta.
+2. Probar conexión.
+3. Probar catálogo: dice cuántos resultados llegaron, cuántos son válidos, si hay más páginas y qué campos del mapeo se encontraron.
+4. Probar reproducción: el servidor obtiene el enlace de una película o un episodio y comprueba que responde. También avisa si es NO COMPATIBLE.
+5. Activar: exige lo mínimo para importar y dice qué falta.
+6. Iniciar importación (completa) o Sincronizar cambios (solo lo nuevo, si se configuró "cambios desde").
+7. Pausar, Reanudar, Reiniciar, o "Reiniciar y confirmar bajas" (para dar de baja títulos que la fuente realmente quitó).
+8. Ver errores.
+
+Estados de la importación:
+- Completada.
+- Completada con advertencias.
+- PARCIAL (no completa): se cortó por un límite o un fin de lista dudoso; no se da de baja nada.
+- FALLIDA: muestra la causa.
+- Pendiente, En curso, En espera (la fuente pidió esperar) o Pausada.
